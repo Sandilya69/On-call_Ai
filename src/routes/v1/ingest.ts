@@ -5,6 +5,7 @@ import { normalizeAlert } from "../../services/alertNormalizer.js";
 import { checkDedup } from "../../services/dedup.js";
 import { hmacValidation } from "../../middleware/hmac.js";
 import { alertQueue } from "../../workers/queues.js";
+import { env } from "../../config/env.js";
 import { NotFoundError } from "../../utils/errors.js";
 import { logger } from "../../utils/logger.js";
 const log = logger.child({ component: "ingest" });
@@ -41,14 +42,23 @@ export async function ingestRoutes(app: FastifyInstance): Promise<void> {
       });
 
       // Queue async processing (AI routing → notify → escalation) if BullMQ is available
+      // PRD 5.1: P3/P4 grace period — hold for GRACE_PERIOD_SECONDS before processing
       if (alertQueue) {
+        const isLowSeverity = alert.severity === "P3" || alert.severity === "P4";
+        const delayMs = isLowSeverity ? env.GRACE_PERIOD_SECONDS * 1000 : 0;
+
         await alertQueue.add(`alert:${incident.id}`, {
           incidentId: incident.id,
           orgId: org.id,
           severity: alert.severity,
           service: alert.service,
-        });
-        log.info({ incidentId: incident.id }, "Alert queued for async processing");
+        }, delayMs > 0 ? { delay: delayMs } : undefined);
+
+        if (isLowSeverity) {
+          log.info({ incidentId: incident.id, delaySec: env.GRACE_PERIOD_SECONDS }, "P3/P4 alert held for grace period");
+        } else {
+          log.info({ incidentId: incident.id }, "Alert queued for immediate processing");
+        }
       }
 
       log.info({ incidentId: incident.id, severity: alert.severity, service: alert.service }, "Incident created");

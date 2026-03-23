@@ -107,6 +107,27 @@ async function registerSlashCommands(): Promise<void> {
     new SlashCommandBuilder()
       .setName("briefing")
       .setDescription("Request a handover briefing regeneration"),
+    new SlashCommandBuilder()
+      .setName("swap")
+      .setDescription("Request a rota swap with another engineer")
+      .addUserOption((opt) =>
+        opt.setName("engineer").setDescription("The engineer to swap with").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("shift_date").setDescription("Shift date (YYYY-MM-DD), defaults to your next shift").setRequired(false)
+      ),
+    new SlashCommandBuilder()
+      .setName("available")
+      .setDescription("Set your availability (mark yourself unavailable)")
+      .addStringOption((opt) =>
+        opt.setName("from").setDescription("Unavailable from (YYYY-MM-DD)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("to").setDescription("Unavailable to (YYYY-MM-DD)").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("reason").setDescription("Reason (holiday, sick, travel, personal)").setRequired(false)
+      ),
   ];
 
   const rest = new REST({ version: "10" }).setToken(env.DISCORD_BOT_TOKEN);
@@ -266,6 +287,152 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction): Pro
 
     case "briefing": {
       await interaction.reply({ content: "🔄 Regenerating briefing... (this feature requires Phase 3 workers)" });
+      break;
+    }
+
+    case "swap": {
+      const targetUser = interaction.options.getUser("engineer", true);
+      const shiftDate = interaction.options.getString("shift_date");
+
+      // Find requesting engineer
+      const requestingEng = await prisma.engineer.findFirst({
+        where: { discordUserId: interaction.user.id },
+      });
+      if (!requestingEng) {
+        await interaction.reply({ content: "❌ Your Discord account is not linked to an engineer profile.", ephemeral: true });
+        return;
+      }
+
+      // Find target engineer
+      const targetEng = await prisma.engineer.findFirst({
+        where: { discordUserId: targetUser.id },
+      });
+      if (!targetEng) {
+        await interaction.reply({ content: `❌ ${targetUser.username} is not linked to an engineer profile.`, ephemeral: true });
+        return;
+      }
+
+      // Find requesting engineer's upcoming shift
+      const now = new Date();
+      const shiftWhere: any = {
+        engineerId: requestingEng.id,
+        status: { in: ["scheduled", "active"] },
+      };
+      if (shiftDate) {
+        const date = new Date(shiftDate);
+        shiftWhere.startTime = { gte: date };
+        shiftWhere.endTime = { lte: new Date(date.getTime() + 24 * 60 * 60 * 1000) };
+      } else {
+        shiftWhere.startTime = { gte: now };
+      }
+
+      const shift = await prisma.rota.findFirst({
+        where: shiftWhere,
+        orderBy: { startTime: "asc" },
+        include: { team: true },
+      });
+
+      if (!shift) {
+        await interaction.reply({ content: "❌ No upcoming shift found.", ephemeral: true });
+        return;
+      }
+
+      // Check availability conflict
+      const conflict = await prisma.availability.findFirst({
+        where: {
+          engineerId: targetEng.id,
+          unavailableFrom: { lte: shift.endTime },
+          unavailableTo: { gte: shift.startTime },
+          approved: true,
+        },
+      });
+
+      if (conflict) {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("❌ Swap Rejected — Conflict")
+              .setDescription(`${targetEng.name} is unavailable during that shift (${conflict.reason || "no reason"}).`)
+              .setColor(Colors.Red)
+              .setTimestamp(),
+          ],
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Perform swap
+      await prisma.rota.update({
+        where: { id: shift.id },
+        data: {
+          engineerId: targetEng.id,
+          generatedBy: "swap",
+          status: "swapped",
+          notes: `Swapped from ${requestingEng.name} to ${targetEng.name} via Discord`,
+        },
+      });
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("🔄 Shift Swap Completed")
+            .setColor(Colors.Green)
+            .addFields(
+              { name: "Team", value: shift.team.name, inline: true },
+              { name: "From", value: requestingEng.name, inline: true },
+              { name: "To", value: targetEng.name, inline: true },
+              { name: "Shift", value: `<t:${Math.floor(shift.startTime.getTime() / 1000)}:f> → <t:${Math.floor(shift.endTime.getTime() / 1000)}:f>` },
+            )
+            .setTimestamp(),
+        ],
+      });
+      break;
+    }
+
+    case "available": {
+      const fromStr = interaction.options.getString("from", true);
+      const toStr = interaction.options.getString("to", true);
+      const reason = interaction.options.getString("reason") || undefined;
+
+      const eng = await prisma.engineer.findFirst({
+        where: { discordUserId: interaction.user.id },
+      });
+      if (!eng) {
+        await interaction.reply({ content: "❌ Your Discord account is not linked.", ephemeral: true });
+        return;
+      }
+
+      const from = new Date(fromStr);
+      const to = new Date(toStr);
+      if (isNaN(from.getTime()) || isNaN(to.getTime()) || to <= from) {
+        await interaction.reply({ content: "❌ Invalid dates. Use YYYY-MM-DD format.", ephemeral: true });
+        return;
+      }
+
+      await prisma.availability.create({
+        data: {
+          engineerId: eng.id,
+          unavailableFrom: from,
+          unavailableTo: to,
+          reason: reason || null,
+          approved: true,
+        },
+      });
+
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("📅 Availability Updated")
+            .setDescription(`${eng.name} marked as **unavailable**`)
+            .setColor(Colors.Orange)
+            .addFields(
+              { name: "From", value: `<t:${Math.floor(from.getTime() / 1000)}:D>`, inline: true },
+              { name: "To", value: `<t:${Math.floor(to.getTime() / 1000)}:D>`, inline: true },
+              { name: "Reason", value: reason || "Not specified", inline: true },
+            )
+            .setTimestamp(),
+        ],
+      });
       break;
     }
 

@@ -12,6 +12,7 @@ import { disconnectRedis } from "../config/redis.js";
 import { startAlertWorker } from "./alertWorker.js";
 import { startEscalationWorker } from "./escalationWorker.js";
 import { startNotificationWorker } from "./notificationWorker.js";
+import { startHandoverWorker } from "./handoverWorker.js";
 import { closeQueues } from "./queues.js";
 
 const log = logger.child({ component: "worker-main" });
@@ -24,11 +25,13 @@ async function startWorkers(): Promise<void> {
     const alertWorker = startAlertWorker();
     const escalationWorker = startEscalationWorker();
     const notificationWorker = startNotificationWorker();
+    const handoverWorker = startHandoverWorker();
 
     const started = [
       alertWorker && "alert",
       escalationWorker && "escalation",
       notificationWorker && "notification",
+      handoverWorker && "handover",
     ].filter(Boolean);
 
     if (started.length === 0) {
@@ -43,6 +46,7 @@ async function startWorkers(): Promise<void> {
       if (alertWorker) await alertWorker.close();
       if (escalationWorker) await escalationWorker.close();
       if (notificationWorker) await notificationWorker.close();
+      if (handoverWorker) await handoverWorker.close();
       await closeQueues();
       await disconnectDatabase();
       await disconnectRedis();
