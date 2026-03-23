@@ -1,0 +1,43 @@
+BACKEND PRODUCT REQUIREMENTS DOCUMENT
+OnCall Maestro
+Backend Engineering Specification
+Node.js  |  TypeScript  |  Fastify  |  Prisma  |  BullMQ  |  Redis
+CONFIDENTIAL — Backend Engineering Team Only
+1. Backend Overview
+This document defines the complete backend specification for OnCall Maestro — the Node.js/TypeScript server that powers alert ingestion, AI routing, escalation timers, voice handover, and rota management. This is the engineering source of truth for every developer working on the backend.
+2. Project Structure
+The backend follows a layered architecture. API routes handle HTTP concerns only. Services contain all business logic. Workers run async jobs. This separation means each layer can be tested and changed independently.
+3. Full Dependencies
+3.1 package.json — Production Dependencies
+3.2 Dev Dependencies
+4. Environment Variables
+All secrets are passed via environment variables. Never hardcode any key in source code. Copy .env.example to .env and fill in real values.
+5. Prisma Database Schema
+Complete Prisma schema for PostgreSQL 16. Run 'npx prisma migrate dev' to apply. All UUIDs are auto-generated. Soft deletes on engineers and teams via deletedAt field.
+5.1 schema.prisma
+6. API Routes Specification
+6.1 Webhook Ingestion
+6.2 Incidents
+6.3 Rota & Engineers
+6.4 Handovers
+6.5 Slack Endpoints
+7. Core Service Implementations
+7.1 Alert Normalizer — src/services/alertNormalizer.ts
+7.2 Redis Dedup — src/services/dedup.ts
+7.3 Claude AI Routing — src/integrations/claude.ts
+7.4 BullMQ Queues — src/workers/queues.ts
+7.5 Escalation Worker — src/workers/escalationWorker.ts
+7.6 Whisper TTS — src/integrations/whisper.ts
+7.7 Cron Jobs — src/jobs/cron.ts
+8. Middleware
+8.1 HMAC Webhook Validation — src/middleware/hmac.ts
+8.2 Bearer Auth — src/middleware/auth.ts
+9. Docker Setup
+9.1 docker-compose.yml
+9.2 Dockerfile
+10. Error Handling & Logging
+10.1 Custom Error Classes — src/utils/errors.ts
+10.2 Winston Logger — src/utils/logger.ts
+11. Backend Build Order
+Build in this exact order. Each step produces something testable before moving on. Never skip a step — each one is a dependency of the next.
+12. Security Checklist

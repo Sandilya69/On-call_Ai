@@ -1,0 +1,261 @@
+// ============================================
+// OnCall Maestro — Prisma Schema (SQLite Dev)
+// ============================================
+// SQLite for local dev, PostgreSQL for production.
+// Run: npx prisma db push
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organisation {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  plan      String    @default("free")
+  settings  String    @default("{}")
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  engineers          Engineer[]
+  teams              Team[]
+  incidents          Incident[]
+  escalationPolicies EscalationPolicy[]
+  auditLogs          AuditLog[]
+
+  @@map("organisations")
+}
+
+model Engineer {
+  id                String    @id @default(uuid())
+  orgId             String    @map("org_id")
+  name              String
+  email             String    @unique
+  phone             String?
+  discordUserId     String?   @map("discord_user_id")
+  timezone          String    @default("UTC")
+  skillTags         String    @default("[]") @map("skill_tags")
+  calendarToken     String?   @map("calendar_token")
+  workingHoursStart String    @default("09:00") @map("working_hours_start")
+  workingHoursEnd   String    @default("18:00") @map("working_hours_end")
+  maxShiftsPerWeek  Int       @default(3) @map("max_shifts_per_week")
+  notificationPrefs String    @default("{}") @map("notification_prefs")
+  isActive          Boolean   @default(true) @map("is_active")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  organisation          Organisation      @relation(fields: [orgId], references: [id])
+  teamMemberships       TeamMember[]
+  assignedIncidents     Incident[]        @relation("AssignedEngineer")
+  rotaEntries           Rota[]
+  availability          Availability[]
+  escalationEventsFrom  EscalationEvent[] @relation("EscalationFrom")
+  escalationEventsTo    EscalationEvent[] @relation("EscalationTo")
+  notifications         Notification[]
+  handoversOutgoing     Handover[]        @relation("OutgoingEngineer")
+  handoversIncoming     Handover[]        @relation("IncomingEngineer")
+
+  @@map("engineers")
+}
+
+model Team {
+  id                 String    @id @default(uuid())
+  orgId              String    @map("org_id")
+  name               String
+  escalationPolicyId String?   @map("escalation_policy_id")
+  discordChannelId   String?   @map("discord_channel_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  organisation     Organisation      @relation(fields: [orgId], references: [id])
+  escalationPolicy EscalationPolicy? @relation(fields: [escalationPolicyId], references: [id])
+  members          TeamMember[]
+  rotaEntries      Rota[]
+  incidents        Incident[]
+  handovers        Handover[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id         String   @id @default(uuid())
+  teamId     String   @map("team_id")
+  engineerId String   @map("engineer_id")
+  role       String   @default("member")
+  joinedAt   DateTime @default(now()) @map("joined_at")
+
+  team     Team     @relation(fields: [teamId], references: [id])
+  engineer Engineer @relation(fields: [engineerId], references: [id])
+
+  @@unique([teamId, engineerId])
+  @@map("team_members")
+}
+
+model EscalationPolicy {
+  id                    String   @id @default(uuid())
+  orgId                 String   @map("org_id")
+  name                  String
+  p1AckWindowSeconds    Int      @default(300) @map("p1_ack_window_seconds")
+  p2AckWindowSeconds    Int      @default(900) @map("p2_ack_window_seconds")
+  p3AckWindowSeconds    Int      @default(3600) @map("p3_ack_window_seconds")
+  p4AckWindowSeconds    Int      @default(14400) @map("p4_ack_window_seconds")
+  escalationChain       String   @map("escalation_chain")
+  repeatIntervalSeconds Int      @default(300) @map("repeat_interval_seconds")
+  maxEscalations        Int      @default(3) @map("max_escalations")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  organisation Organisation @relation(fields: [orgId], references: [id])
+  teams        Team[]
+
+  @@map("escalation_policies")
+}
+
+model Rota {
+  id            String   @id @default(uuid())
+  teamId        String   @map("team_id")
+  engineerId    String   @map("engineer_id")
+  startTime     DateTime @map("start_time")
+  endTime       DateTime @map("end_time")
+  shiftType     String   @default("primary") @map("shift_type")
+  googleEventId String?  @map("google_event_id")
+  status        String   @default("scheduled")
+  notes         String?
+  generatedBy   String   @default("system") @map("generated_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  team      Team       @relation(fields: [teamId], references: [id])
+  engineer  Engineer   @relation(fields: [engineerId], references: [id])
+  handovers Handover[]
+
+  @@map("rota")
+}
+
+model Incident {
+  id               String    @id @default(uuid())
+  orgId            String    @map("org_id")
+  teamId           String?   @map("team_id")
+  externalId       String?   @map("external_id")
+  fingerprint      String
+  title            String
+  description      String?
+  severity         String
+  service          String
+  source           String
+  status           String    @default("open")
+  assigneeId       String?   @map("assignee_id")
+  routedBy         String    @default("rota") @map("routed_by")
+  routingRationale String?   @map("routing_rationale")
+  acknowledgedAt   DateTime? @map("acknowledged_at")
+  resolvedAt       DateTime? @map("resolved_at")
+  resolutionNotes  String?   @map("resolution_notes")
+  labels           String    @default("{}")
+  rawPayload       String    @map("raw_payload")
+  firedAt          DateTime  @map("fired_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  escalationJobId  String?   @map("escalation_job_id")
+
+  organisation     Organisation      @relation(fields: [orgId], references: [id])
+  team             Team?             @relation(fields: [teamId], references: [id])
+  assignee         Engineer?         @relation("AssignedEngineer", fields: [assigneeId], references: [id])
+  escalationEvents EscalationEvent[]
+  notifications    Notification[]
+
+  @@map("incidents")
+}
+
+model EscalationEvent {
+  id              String    @id @default(uuid())
+  incidentId      String    @map("incident_id")
+  fromEngineerId  String?   @map("from_engineer_id")
+  toEngineerId    String    @map("to_engineer_id")
+  escalationLevel Int       @map("escalation_level")
+  reason          String
+  channelUsed     String    @map("channel_used")
+  deliveryStatus  String    @default("sent") @map("delivery_status")
+  ackedAt         DateTime? @map("acked_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  incident     Incident  @relation(fields: [incidentId], references: [id])
+  fromEngineer Engineer? @relation("EscalationFrom", fields: [fromEngineerId], references: [id])
+  toEngineer   Engineer  @relation("EscalationTo", fields: [toEngineerId], references: [id])
+
+  @@map("escalation_events")
+}
+
+model Notification {
+  id                String    @id @default(uuid())
+  incidentId        String    @map("incident_id")
+  engineerId        String    @map("engineer_id")
+  channel           String
+  messageBody       String    @map("message_body")
+  externalMessageId String?   @map("external_message_id")
+  status            String    @default("pending")
+  errorMessage      String?   @map("error_message")
+  sentAt            DateTime? @map("sent_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  incident Incident @relation(fields: [incidentId], references: [id])
+  engineer Engineer @relation(fields: [engineerId], references: [id])
+
+  @@map("notifications")
+}
+
+model Handover {
+  id                   String    @id @default(uuid())
+  teamId               String    @map("team_id")
+  outgoingEngineerId   String    @map("outgoing_engineer_id")
+  incomingEngineerId   String    @map("incoming_engineer_id")
+  shiftId              String    @map("shift_id")
+  briefingText         String    @map("briefing_text")
+  audioUrl             String?   @map("audio_url")
+  audioDurationSeconds Int?      @map("audio_duration_seconds")
+  openIncidentsCount   Int       @default(0) @map("open_incidents_count")
+  resolvedThisShift    Int       @default(0) @map("resolved_this_shift")
+  deliveryStatus       String    @default("pending") @map("delivery_status")
+  deliveredAt          DateTime? @map("delivered_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  team             Team     @relation(fields: [teamId], references: [id])
+  outgoingEngineer Engineer @relation("OutgoingEngineer", fields: [outgoingEngineerId], references: [id])
+  incomingEngineer Engineer @relation("IncomingEngineer", fields: [incomingEngineerId], references: [id])
+  shift            Rota     @relation(fields: [shiftId], references: [id])
+
+  @@map("handovers")
+}
+
+model Availability {
+  id              String   @id @default(uuid())
+  engineerId      String   @map("engineer_id")
+  unavailableFrom DateTime @map("unavailable_from")
+  unavailableTo   DateTime @map("unavailable_to")
+  reason          String?
+  approved        Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  engineer Engineer @relation(fields: [engineerId], references: [id])
+
+  @@map("availability")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  orgId      String   @map("org_id")
+  actorId    String?  @map("actor_id")
+  actorType  String   @map("actor_type")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  metadata   String   @default("{}")
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  organisation Organisation @relation(fields: [orgId], references: [id])
+
+  @@map("audit_log")
+}

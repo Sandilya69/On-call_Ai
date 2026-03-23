@@ -1,0 +1,696 @@
+
+OnCall Maestro
+Product Requirements Document
+AI-Powered On-Call Scheduler, Escalation Bot & Voice Handover Platform
+
+This document defines the complete product, technical architecture, database schema, automation workflows, and build roadmap for OnCall Maestro — a direct competitor to PagerDuty, OpsGenie, and VictorOps.
+
+1. Executive Summary
+OnCall Maestro is an AI-native, self-hosted on-call management platform that replaces legacy tools like PagerDuty and OpsGenie. It combines intelligent alert routing, automated multi-channel escalation, AI-generated voice handovers, and smart rota scheduling into a single cohesive system — at 90% lower cost than existing SaaS incumbents.
+
+1.1  Problem Statement
+Engineering teams running 24/7 on-call rotations suffer from four critical failures in existing tools:
+Alert fatigue — PagerDuty fires raw alerts without intelligence. Engineers receive 800+ alerts per week, 90%+ of which are noise.
+Dumb routing — Round-robin assignment ignores skills, timezones, and incident history. The wrong person gets woken up.
+Zero handover context — Shift changes happen with no structured briefing. Incoming engineers start blind.
+Vendor lock-in at high cost — $40/user/month, all data trapped, no AI, no export.
+
+1.2  Solution Overview
+OnCall Maestro addresses every failure above with a modern, AI-first architecture:
+Intelligent deduplication and grace-period filtering eliminates noise before any notification fires.
+Claude AI routes each alert to the best available engineer based on skill tags, timezone, and incident history — not just rota position.
+Celery-powered escalation timers enforce SLA windows automatically. No manual policy management.
+AI-generated voice handover briefings via Whisper TTS ensure incoming engineers have full context on every shift change.
+Full self-hosting with Supabase (PostgreSQL) means teams own all data with no per-seat pricing.
+
+1.3  Target Market
+
+1.4  Key Metrics (12-Month Targets)
+
+2. Product Scope & Features
+2.1  Core Modules
+Module 1: Alert Ingestion Engine
+The entry point for all signals. Every alert from any monitoring tool hits a single webhook endpoint. Maestro normalizes, deduplicates, and fingerprints before any downstream logic runs.
+Universal webhook receiver — accepts Prometheus AlertManager, PagerDuty, Grafana, custom HTTP POST
+Alert normalization — maps any schema to a canonical AlertObject (id, title, severity, service, labels, timestamp)
+Fingerprint deduplication — SHA-256 hash of (service + metric + labels) checked against Redis with 30-second TTL
+Grace period filter — P3/P4 alerts held for 45 seconds; if self-resolved, no notification fires
+Severity re-evaluation — Claude API optionally re-classifies severity based on recent incident history for the same service
+
+Module 2: AI Routing Engine
+The intelligence layer. Claude receives the normalized alert and selects the optimal engineer from the on-call pool using a structured reasoning prompt.
+Input context: alert title, service, severity, error type, current rota, each engineer's skill tags, timezone, and last 5 incidents they resolved
+Output: primary assignee ID, backup chain (ordered list), estimated complexity score, routing rationale (logged for audit)
+Fallback: if Claude API is unavailable (>2s timeout), system falls back to standard rota order — never blocks
+Cost: approximately $0.008 per routing decision using claude-sonnet-4-6
+
+Module 3: Multi-Channel Notification
+Notifications fire in parallel across channels. Channel priority is configurable per team and per severity level.
+
+Module 4: Escalation Timer Engine
+Every unacknowledged alert has a live countdown timer managed by Celery Beat. Escalation is fully automatic with zero manual intervention required.
+Timer starts the moment the first notification fires
+ACK can be received from: Slack reaction, /ack slash command, web dashboard click, or API call
+Cross-channel ACK state stored in Redis — ACK from any channel stops all escalation timers
+Before escalating, system checks: assignee calendar for OOO/travel blocks, current shift status, escalation policy exceptions
+Escalation chain: Primary → L2 backup → Team Lead → Incident Commander → Manager
+Every escalation event is logged with reason, timestamp, and which engineer was tried
+
+Module 5: Voice Handover Briefing
+10 minutes before every shift end, Maestro auto-generates a spoken briefing for the incoming engineer. No manual runbooks. No rushed Slack summaries.
+Claude generates a structured script: open incidents (status + last action), recently resolved (with what fixed it), watch items (services showing elevated error rates), and any unusual patterns from the shift
+Whisper TTS converts the script to a natural-sounding MP3 audio file
+Delivered via: Slack audio message to incoming engineer, optional phone call, stored in handover history
+Incoming engineer can reply with /briefing to regenerate or /extend to request a written summary
+
+Module 6: Rota Management & Scheduling
+Smart scheduling with conflict detection, timezone fairness scoring, and Google Calendar synchronisation.
+Engineers set availability windows via Slack (/available) or web dashboard
+Constraint solver generates weekly rota respecting: availability, timezone balance (no one always on overnight), holiday calendar, maximum consecutive shifts (configurable)
+/swap @engineer command in Slack — Maestro checks both calendars, approves or flags conflicts, updates rota and Calendar events
+Manager approval workflow for swaps exceeding a configurable threshold (e.g. more than 2 swaps per week)
+Google Calendar sync — every shift creates a Calendar event with on-call runbook links in the description
+
+2.2  Non-Functional Requirements
+
+3. System Architecture
+3.1  High-Level Architecture
+Maestro is a three-tier event-driven system: ingestion layer, processing core, and delivery layer. All components are containerised and orchestrated via Docker Compose for self-hosted deployments.
+
+
+3.2  Technology Stack (Complete)
+Backend — Python 3.11+
+
+Frontend — React + TypeScript
+
+Infrastructure
+
+4. Database Schema (PostgreSQL)
+All tables use UUID primary keys, created_at/updated_at timestamps, and soft deletes (deleted_at). Row Level Security (RLS) is enabled on all tables in Supabase to enforce team-level isolation.
+
+4.1  organisations
+Top-level multi-tenancy entity. All other tables belong to an organisation.
+
+4.2  engineers
+Individual users. An engineer belongs to one organisation and can be a member of multiple teams.
+
+4.3  teams
+
+4.4  team_members
+Junction table linking engineers to teams with their role.
+
+4.5  escalation_policies
+Defines the timing and chain for auto-escalation. One policy can apply to multiple teams.
+
+4.6  rota
+Each row is a single on-call shift assignment. The rota is generated weekly by the scheduling engine.
+
+4.7  incidents
+The central record of every alert that entered the system. All downstream events reference this table.
+
+4.8  escalation_events
+Immutable audit log of every escalation action. Never updated, only appended.
+
+4.9  notifications
+Log of every outbound notification across all channels.
+
+4.10  handovers
+Record of every AI-generated shift handover briefing.
+
+4.11  availability
+Engineers declare when they are NOT available for on-call shifts.
+
+4.12  audit_log
+Append-only log of every user and system action across the platform. Used for compliance, debugging, and security review.
+
+4.13  Key Indexes
+Performance-critical indexes beyond primary keys:
+incidents(org_id, status, created_at DESC) — dashboard incident list query
+incidents(fingerprint) — dedup lookup on alert ingest
+incidents(service, created_at DESC) — service history for AI routing context
+rota(team_id, start_time, end_time) — current on-call lookup
+escalation_events(incident_id, created_at DESC) — escalation timeline
+audit_log(org_id, created_at DESC) — compliance queries
+
+5. Automation Workflows
+5.1  Alert Ingest → Route → Notify (Primary Flow)
+This is the hottest path in the system. Every step is async and non-blocking. Target total latency from webhook receipt to Slack notification: under 3 seconds for P1.
+
+Webhook POST arrives at POST /api/v1/ingest/{org_slug}
+FastAPI parses and validates payload against AlertSchema (Pydantic). Returns 202 Accepted immediately — never blocks the sender.
+Celery task process_alert(payload, org_id) is queued in Redis.
+Dedup check: SHA-256 fingerprint(service + metric + labels). SETNX in Redis with 30-second TTL. If key exists, task exits — duplicate suppressed.
+Severity grace period: if P3 or P4, sleep task for 45 seconds (Celery countdown). If alert is resolved before wakeup, no notification fires.
+Persist incident record to PostgreSQL with status=open.
+AI routing: call Claude API with routing prompt (alert context + engineer pool). Parse response for assignee_id. On timeout (>2s), fall back to rota order.
+Update incident.assignee_id, log routing_rationale.
+Dispatch notifications in parallel: Celery group([send_slack.s(), send_sms.s(), send_voice.s()]) — channels are filtered by severity config.
+Start escalation countdown: escalation_timer.apply_async(args=[incident_id], countdown=ack_window_seconds)
+Write escalation_events row (level=1, channel used, delivery_status).
+
+5.2  Escalation Timer Workflow
+Runs as a Celery task. Designed to be idempotent — safe to retry on failure.
+
+Task wakes up after ACK window expires.
+Query incident.status. If acknowledged or resolved, exit immediately — no action.
+Check assignee's Google Calendar for OOO block overlapping current time. If OOO found, skip to next engineer in chain.
+Determine next escalation target from escalation_policy.escalation_chain.
+If max_escalations reached, notify manager directly and post to team Slack channel with @here.
+Update incident.assignee_id to new engineer.
+Dispatch notifications to new assignee (same parallel channel dispatch as primary flow).
+Log escalation_events row (reason=no_ack, level=N+1).
+Start new escalation countdown for the new assignee.
+
+5.3  ACK Reception Workflow
+ACK can arrive from multiple channels simultaneously. System is idempotent — double-ACK has no side effects.
+
+ACK signal received (Slack /ack {incident_id}, Slack reaction, API PATCH /incidents/{id}/ack, web dashboard button).
+Redis SET ack:{incident_id} = engineer_id, EX 86400 (1 day TTL for audit).
+Celery task: cancel active escalation timer for this incident (using revoke by task_id stored at schedule time).
+UPDATE incidents SET status=acknowledged, acknowledged_at=NOW(), assignee_id={engineer_id}.
+Append audit_log row (action=incident.acknowledged).
+Post confirmation to team Slack channel: incident title, acknowledged by, time to ACK.
+
+5.4  Voice Handover Briefing Workflow
+Runs on a Celery Beat schedule — triggered 10 minutes before every shift end time.
+
+Celery Beat runs check_upcoming_handovers every 5 minutes.
+Query rota for shifts ending in the next 10–15 minutes. For each: fetch outgoing engineer, incoming engineer.
+Query open incidents for the team. Query incidents resolved this shift. Identify services with elevated error rate in the last 2 hours.
+Build Claude prompt with structured data: open_incidents[], resolved_today[], watch_services[], shift_duration, team_name.
+Call Claude API. Parse response into structured briefing sections: Overview, Open Incidents, Resolved Today, Watch List, Handover Notes.
+Call Whisper TTS API with briefing text. Receive MP3 audio. Upload to object storage. Store URL in handovers.audio_url.
+Send Slack audio message to incoming engineer's DM with briefing text as fallback caption.
+Optionally: initiate Twilio voice call to incoming engineer's phone if they have voice_handover=true in notification_prefs.
+Insert handovers row with both engineer IDs, briefing text, audio URL, delivery status.
+
+5.5  Rota Generation Workflow
+Runs every Sunday at 18:00 UTC for the following week. Also runs on-demand when /swap or availability changes occur.
+
+Fetch all engineers in the team with is_active=true.
+Fetch availability table for the target week — exclude engineers with unavailable_from/to overlapping any shift slot.
+Apply constraint rules: max_shifts_per_week per engineer, no two consecutive night shifts, timezone balance scoring (engineers in UTC-5 to UTC+2 get preference for night shifts).
+Run constraint solver (simple greedy algorithm with backtracking). Output: list of {shift_slot → engineer_id} assignments.
+Write rota rows to database for each assignment.
+For each rota row, call Google Calendar API to create calendar event on engineer's calendar with shift details and runbook links.
+Post weekly rota summary to team Slack channel.
+Write audit_log row (action=rota.generated, metadata={week, team_id, assignments_count}).
+
+5.6  Swap Request Workflow
+Triggered by /swap @engineer in Slack.
+
+Slack Bolt receives slash command. Parse: requesting engineer, target engineer, optional shift date.
+Find the requesting engineer's upcoming shift.
+Check target engineer's availability table for that shift window — conflict check.
+Check both engineers' max_shifts_per_week would not be exceeded.
+If auto-approve criteria met (no conflicts, both under shift cap, more than 24h notice): approve immediately.
+If manual approval required: send Slack message to team lead with Approve / Reject buttons.
+On approval: UPDATE rota SET engineer_id = target_engineer_id, generated_by='swap', notes='Swapped with {name}'. Update Google Calendar events for both engineers.
+Notify both engineers of confirmed swap via Slack DM.
+Log audit_log row (action=rota.swap_approved).
+
+6. API Specification
+6.1  Authentication
+All API endpoints (except /ingest webhooks and /health) require a Bearer JWT token. JWTs are signed with RS256. Webhook endpoints use HMAC-SHA256 signature verification in the X-Maestro-Signature header.
+
+6.2  Core Endpoints
+
+7. AI Prompt Specifications
+7.1  Alert Routing Prompt
+Sent to claude-sonnet-4-6 for every new unrouted incident. Must return structured JSON.
+
+System: You are an expert on-call routing system. Your job is to select the best engineer to handle an incident.
+Always respond with valid JSON only. No preamble.
+
+User: Route this incident to the best available engineer.
+
+INCIDENT:
+Title: {incident.title}
+Severity: {incident.severity}
+Service: {incident.service}
+Description: {incident.description}
+Labels: {incident.labels}
+
+AVAILABLE ENGINEERS:
+{engineers.map(e => JSON.stringify({
+  id: e.id, name: e.name, skills: e.skill_tags,
+  timezone: e.timezone, is_working_hours: <bool>,
+  recent_incidents_resolved: <count_last_7_days>
+}))}
+
+RECENT INCIDENTS ON THIS SERVICE (last 5):
+{recent_incidents}
+
+Respond with:
+{
+  "assignee_id": "<uuid>",
+  "backup_chain": ["<uuid>", "<uuid>"],
+  "confidence": 0.0-1.0,
+  "rationale": "<1-2 sentence explanation>"
+}
+
+7.2  Voice Handover Briefing Prompt
+Sent to claude-sonnet-4-6 at shift end. Output is spoken aloud by Whisper TTS — must be written as natural speech, not bullet points.
+
+System: You are generating a spoken handover briefing for an on-call engineer.
+Write it as natural speech — clear, concise, and actionable. No bullet points.
+Target length: 45-75 seconds when read aloud (approximately 120-200 words).
+
+User: Generate a shift handover briefing.
+
+OUTGOING: {outgoing_engineer.name} (shift: {shift_start} to {shift_end})
+INCOMING: {incoming_engineer.name}
+TEAM: {team.name}
+
+OPEN INCIDENTS ({open_incidents.length}):
+{open_incidents.map(i => `[{i.severity}] {i.title} - open for {i.duration_minutes}min, 
+last action: {i.last_action}`)}
+
+RESOLVED THIS SHIFT ({resolved.length}):
+{resolved.map(i => `{i.title} - fixed by {i.resolution_notes}`)}
+
+WATCH LIST (services with elevated errors):
+{watch_services}
+
+Write the briefing as if you are {outgoing_engineer.name} speaking directly to {incoming_engineer.name}.
+
+8. Build Roadmap
+  NOTE    Build in strict phase order. Each phase must be production-stable before the next begins. Reliability is the product — shipping a broken escalation system is worse than shipping nothing.
+
+Phase 1 — Foundation (Weeks 1–3)
+Goal: A working alert pipeline from webhook to Slack message. Deployable and usable by one real team.
+FastAPI project scaffold with Docker Compose (API + Redis + Postgres)
+Supabase project setup + Alembic migrations for core tables (organisations, engineers, incidents, notifications)
+POST /api/v1/ingest endpoint with Pydantic validation and 202 response
+Redis dedup with fingerprint hashing
+Celery worker with process_alert task
+Slack Bolt integration — send DM to on-call engineer when alert fires
+Basic /ack slash command → update incident status in DB
+Health endpoint + Prometheus metrics endpoint
+Unit tests for: dedup logic, alert normalization, ACK flow
+
+Phase 2 — Rota & Escalation (Weeks 4–6)
+Goal: Auto-escalation that never misses, and a real rota that syncs to Calendar.
+rota, escalation_policies, escalation_events, availability tables + migrations
+Celery Beat escalation timer — start on alert, cancel on ACK, escalate on timeout
+Rota generation algorithm (greedy constraint solver)
+Google Calendar API integration — create/update/delete shift events
+/swap Slack command with auto-approve logic
+Twilio SMS integration for escalation fallback
+Integration tests for full alert → escalate → resolve flow
+
+Phase 3 — AI Intelligence (Weeks 7–9)
+Goal: Claude routing and voice handovers working end-to-end.
+Claude API integration — routing prompt with fallback on timeout
+Skill tag system on engineers table — UI to manage tags
+Routing rationale logging (stored in incidents.routing_rationale)
+Whisper TTS integration — generate and store audio files
+Handover briefing workflow — Celery Beat trigger, Claude prompt, TTS, Slack delivery
+handovers table + audio file object storage (S3-compatible)
+A/B comparison logging — AI routing vs rota routing for quality measurement
+
+Phase 4 — Dashboard & Polish (Weeks 10–12)
+Goal: A real web UI that a team lead would actually open every morning.
+React + TypeScript project scaffold with Vite
+Incident timeline view — status, severity, assignee, escalation history
+Rota calendar view — weekly grid, current on-call highlight, upcoming shifts
+Handover history page — view past briefings, play audio
+Basic analytics — MTTR by team, alert volume by service, escalation rate trend
+Twilio voice call integration for P1 notifications
+Multi-tenant isolation audit — verify RLS policies block cross-team data access
+
+Phase 5 — Go-To-Market (Weeks 13–16)
+Goal: First 10 paying teams. Public launch.
+Billing integration (Stripe) — free tier (1 team, 5 engineers), paid plans
+Self-onboarding flow — sign up, connect Slack, set up first team, invite engineers
+Documentation site — setup guide, API reference, FAQ
+Open source the core engine on GitHub — build trust with self-hosting community
+Managed hosted version (maestro.yourdomain.com) for teams who do not want to self-host
+SLA monitoring for Maestro itself — uptime page, status badge
+
+8.1  Milestone Summary
+
+9. Risks & Mitigations
+
+10. Security & Compliance
+10.1  Security Requirements
+All API traffic over HTTPS (TLS 1.2 minimum). No HTTP in production.
+Webhook signatures verified via HMAC-SHA256 on every ingest request.
+JWT tokens signed RS256, expire after 8 hours. Refresh tokens stored httpOnly.
+Engineer phone numbers and calendar OAuth tokens encrypted at rest (AES-256 via Supabase Vault).
+Row Level Security enforced on all Supabase tables — verified by automated test suite.
+All secrets in environment variables. No credentials in source code or Docker images.
+Dependency scanning via GitHub Actions (pip audit, npm audit) on every PR.
+
+10.2  GDPR Compliance
+Engineer PII (name, email, phone) is exportable via GET /api/v1/engineers/{id}/export.
+Engineer deletion (right to erasure) anonymizes records rather than hard-deleting — incident history is preserved with engineer_id nulled.
+Data retention policy: incidents and logs retained 12 months hot, 5 years in cold storage, then purged.
+No third-party analytics or tracking pixels in the web dashboard.
+
+10.3  Operational Security
+Principle of least privilege: Celery workers have read/write access only to tables they need.
+Audit log is append-only — no UPDATE or DELETE permitted on audit_log table (enforced by Postgres policy).
+Rate limiting on all public endpoints: 100 req/min per IP, 1000 req/min per org.
+Slack slash commands verified using Slack signing secret on every request.
+
+11. Competitive Positioning
+
+  NOTE    Maestro does not win on integrations at launch (PagerDuty has 700+, you will launch with ~20). Win on intelligence, price, and data ownership. These are durable advantages.
+
+12. Appendix
+12.1  Environment Variables Reference
+
+12.2  Glossary
+
+— End of Document —
+
+--- Table 1 ---
+Version | 1.0 — Initial Release
+Date | March 2026
+Status | Draft — For Internal Review
+Owner | Product & Engineering Lead
+Classification | Confidential — Internal Only
+
+--- Table 2 ---
+Segment | Size | Pain Level | Go-To-Market
+Startups (5–30 engineers) | Largest addressable | High — cost sensitive | Open source + hosted tier
+Scale-ups (30–150 engineers) | Primary revenue target | Critical — PagerDuty bills $5K+/mo | Direct sales + case studies
+Enterprise (150+ engineers) | Long-term target | Medium — switching cost high | Compliance + self-host option
+
+--- Table 3 ---
+Metric | Target | Notes
+Monthly Active Teams | 500 | Free + paid combined
+Paid Teams | 80 | $49/mo per team baseline
+Monthly Recurring Revenue | $15,000 | Conservative; 80 teams × avg $188
+P1 Alert → Notify Latency | < 5 seconds | End-to-end, 99th percentile
+Escalation Miss Rate | < 0.01% | No alert ever silently drops
+Voice Handover Delivery Rate | > 99.5% | Shift-end briefing success
+
+--- Table 4 ---
+Severity | Primary Channel | Secondary | Tertiary | SLA to First Notify
+P1 — Critical | Voice call (Twilio) | Slack DM | SMS | < 30 seconds
+P2 — High | Slack DM | SMS | Email | < 60 seconds
+P3 — Medium | Slack DM | Email | — | < 5 minutes
+P4 — Low | Email | Slack channel | — | < 30 minutes
+
+--- Table 5 ---
+Requirement | Target | Notes
+Webhook ingest latency | < 200ms p99 | From receipt to Redis dedup check complete
+Notification delivery | < 5s for P1 | Slack + voice in parallel
+System uptime | 99.9% monthly | = < 43 minutes downtime/month
+API response time | < 300ms p95 | All REST endpoints
+Escalation accuracy | 100% | No escalation must ever silently fail
+Data retention | 12 months hot, 5 years cold | Incidents, escalations, handovers
+GDPR compliance | Required | Engineer PII exportable and deletable
+Multi-tenancy isolation | Required | Team A cannot see Team B data
+
+--- Table 6 ---
+Layer | Components | Technology | Responsibility
+Ingestion | Webhook API, Normalizer, Deduplicator | FastAPI + Redis | Receive, normalize, and deduplicate all incoming alerts
+Processing Core | AI Router, Escalation Engine, Rota Scheduler, Briefing Generator | Celery + Claude API | All business logic, AI decisions, timer management
+Delivery | Notification Dispatcher, Voice Engine, Calendar Sync | Slack SDK + Twilio + Whisper | Multi-channel notification and external system sync
+Persistence | Incident Store, Rota DB, Audit Log | PostgreSQL (Supabase) | All persistent state — incidents, rota, engineers, logs
+Cache & Queue | Alert dedup, ACK state, Task broker | Redis | Ephemeral state, Celery message broker
+Frontend | Dashboard, Rota View, Incident Timeline | React + TypeScript | Read-only ops view + rota management UI
+
+--- Table 7 ---
+Package / Service | Version | Purpose | Justification
+FastAPI | 0.110+ | Webhook receiver, REST API | Async, typed, auto-docs, best Python web framework for APIs
+Celery | 5.3+ | Async task queue, cron scheduler | Escalation timers, notification retries, shift-end triggers
+Celery Beat | bundled | Periodic task scheduling | Cron-style triggers for handover briefings, rota checks
+Redis (redis-py) | 5.0+ | Cache + Celery broker | Sub-millisecond dedup lookup, ACK state, rate limiting
+SQLAlchemy | 2.0+ | ORM | Type-safe DB access with async support via asyncpg
+Alembic | 1.13+ | Database migrations | Version-controlled schema changes
+Pydantic v2 | 2.5+ | Data validation | Alert schema validation, API request/response typing
+Anthropic SDK | 0.20+ | Claude API client | AI routing and briefing generation
+Openai SDK | 1.10+ | Whisper TTS | Voice briefing audio generation
+Slack Bolt | 1.18+ | Slack integration | Slash commands, DMs, interactive components
+Twilio | 8.5+ | Voice + SMS | Phone call escalations, SMS fallback
+google-api-python-client | 2.110+ | Google Calendar | Rota sync, OOO detection, shift events
+APScheduler | 3.10+ | In-process scheduler | Lightweight backup scheduler for shift-end triggers
+Structlog | 23.2+ | Structured logging | JSON logs for all events — alertable, searchable
+Pytest + pytest-asyncio | latest | Testing | Async test support for all FastAPI + Celery code
+
+--- Table 8 ---
+Package | Purpose
+React 18 + TypeScript 5 | Core UI framework with full type safety
+Vite | Build tool — fast dev server and production bundler
+Tailwind CSS 3 | Utility-first styling — consistent, fast to build
+React Query (TanStack) | Server state management — polling, caching, optimistic updates
+React Router 6 | Client-side routing for multi-page dashboard
+Recharts | Incident volume charts, MTTR trends, rota visualisation
+Zustand | Lightweight client state (auth, active team, preferences)
+date-fns | Timezone-aware date formatting for global rota view
+
+--- Table 9 ---
+Component | Technology | Notes
+Containerisation | Docker + Docker Compose | Single docker-compose.yml for full local stack
+Database (hosted) | Supabase (PostgreSQL 15) | Managed Postgres, real-time, auth, free tier available
+Database (self-hosted) | PostgreSQL 15 on VPS | Option for enterprise customers, same schema
+Reverse Proxy | Nginx | SSL termination, webhook routing, static file serving
+SSL Certificates | Let's Encrypt + Certbot | Auto-renewing free SSL
+Observability | Prometheus + Grafana | Monitor Maestro itself — queue depth, latency, error rates
+Error Tracking | Sentry | Exception capture for backend and frontend
+CI/CD | GitHub Actions | Test → lint → build → deploy on push to main
+Secrets Management | Docker secrets + .env | Never hardcode credentials; rotate via environment
+
+--- Table 10 ---
+Column | Type | Constraints | Description
+id | UUID | PK, default gen_random_uuid() | Primary key
+name | VARCHAR(255) | NOT NULL | Organisation display name
+slug | VARCHAR(100) | UNIQUE, NOT NULL | URL-safe identifier (e.g. 'acme-corp')
+plan | VARCHAR(50) | DEFAULT 'free' | Subscription plan: free | starter | pro | enterprise
+settings | JSONB | DEFAULT '{}' | Feature flags, notification defaults, SLA overrides
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+deleted_at | TIMESTAMPTZ | NULLABLE | Soft delete timestamp
+
+--- Table 11 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+org_id | UUID | FK → organisations.id, NOT NULL | 
+name | VARCHAR(255) | NOT NULL | Full display name
+email | VARCHAR(255) | UNIQUE, NOT NULL | Login + notification email
+phone | VARCHAR(30) | NULLABLE | E.164 format for Twilio (e.g. +12025551234)
+slack_user_id | VARCHAR(50) | NULLABLE | Slack member ID for DM routing
+timezone | VARCHAR(60) | NOT NULL | IANA tz string (e.g. Asia/Kolkata)
+skill_tags | TEXT[] | DEFAULT '{}' | Array of skills: postgres, kubernetes, python, etc.
+calendar_token | TEXT | NULLABLE, ENCRYPTED | Google Calendar OAuth refresh token (encrypted at rest)
+working_hours_start | TIME | DEFAULT '09:00' | Local time — used for timezone-aware routing
+working_hours_end | TIME | DEFAULT '18:00' | 
+max_shifts_per_week | INTEGER | DEFAULT 3 | Burnout prevention cap
+notification_prefs | JSONB | DEFAULT '{}' | Per-severity channel preferences
+is_active | BOOLEAN | DEFAULT TRUE | Deactivated engineers are excluded from rota
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 12 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+org_id | UUID | FK → organisations.id | 
+name | VARCHAR(255) | NOT NULL | e.g. 'Platform Team', 'Backend SRE'
+escalation_policy_id | UUID | FK → escalation_policies.id, NULLABLE | Default policy for this team
+slack_channel_id | VARCHAR(50) | NULLABLE | Slack channel for team-level alert posts
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 13 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+team_id | UUID | FK → teams.id, NOT NULL | 
+engineer_id | UUID | FK → engineers.id, NOT NULL | 
+role | VARCHAR(50) | DEFAULT 'member' | member | lead | manager
+joined_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 14 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+org_id | UUID | FK → organisations.id | 
+name | VARCHAR(255) | NOT NULL | Policy display name
+p1_ack_window_seconds | INTEGER | DEFAULT 300 | 5 minutes for P1
+p2_ack_window_seconds | INTEGER | DEFAULT 900 | 15 minutes for P2
+p3_ack_window_seconds | INTEGER | DEFAULT 3600 | 1 hour for P3
+p4_ack_window_seconds | INTEGER | DEFAULT 14400 | 4 hours for P4
+escalation_chain | JSONB | NOT NULL | Ordered array of {role: 'lead'|'manager'|'engineer_id': uuid}
+repeat_interval_seconds | INTEGER | DEFAULT 300 | Re-notify if still unacked after escalation
+max_escalations | INTEGER | DEFAULT 3 | Stop escalating after N levels
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 15 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+team_id | UUID | FK → teams.id, NOT NULL | 
+engineer_id | UUID | FK → engineers.id, NOT NULL | 
+start_time | TIMESTAMPTZ | NOT NULL | Shift start (stored as UTC)
+end_time | TIMESTAMPTZ | NOT NULL | Shift end (stored as UTC)
+shift_type | VARCHAR(30) | DEFAULT 'primary' | primary | backup | shadow
+google_event_id | VARCHAR(255) | NULLABLE | Google Calendar event ID for sync
+status | VARCHAR(30) | DEFAULT 'scheduled' | scheduled | active | completed | swapped | cancelled
+notes | TEXT | NULLABLE | Manual notes (e.g. swap reason)
+generated_by | VARCHAR(50) | DEFAULT 'system' | system | manual | swap
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 16 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+org_id | UUID | FK → organisations.id | 
+team_id | UUID | FK → teams.id, NULLABLE | 
+external_id | VARCHAR(255) | NULLABLE | ID from originating system (e.g. Prometheus alert name)
+fingerprint | VARCHAR(64) | NOT NULL, INDEXED | SHA-256 dedup hash
+title | VARCHAR(512) | NOT NULL | Normalized alert title
+description | TEXT | NULLABLE | Full alert body / details
+severity | VARCHAR(10) | NOT NULL | P1 | P2 | P3 | P4
+service | VARCHAR(255) | NOT NULL, INDEXED | Affected service name
+source | VARCHAR(100) | NOT NULL | prometheus | pagerduty | grafana | custom
+status | VARCHAR(30) | DEFAULT 'open' | open | acknowledged | resolved | suppressed
+assignee_id | UUID | FK → engineers.id, NULLABLE | Currently assigned engineer
+routed_by | VARCHAR(30) | DEFAULT 'ai' | ai | manual | rota
+routing_rationale | TEXT | NULLABLE | Claude's routing explanation (logged)
+acknowledged_at | TIMESTAMPTZ | NULLABLE | 
+resolved_at | TIMESTAMPTZ | NULLABLE | 
+resolution_notes | TEXT | NULLABLE | How it was fixed
+labels | JSONB | DEFAULT '{}' | Raw labels from source system
+raw_payload | JSONB | NOT NULL | Original webhook payload for audit
+created_at | TIMESTAMPTZ | DEFAULT NOW() | When alert entered Maestro
+fired_at | TIMESTAMPTZ | NOT NULL | When alert fired at source system
+
+--- Table 17 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+incident_id | UUID | FK → incidents.id, NOT NULL | 
+from_engineer_id | UUID | FK → engineers.id, NULLABLE | NULL if first notification
+to_engineer_id | UUID | FK → engineers.id, NOT NULL | 
+escalation_level | INTEGER | NOT NULL | 1 = first notify, 2 = first escalation, etc.
+reason | VARCHAR(100) | NOT NULL | no_ack | ooo | policy_override | manual
+channel_used | VARCHAR(50) | NOT NULL | slack | sms | voice | email
+delivery_status | VARCHAR(30) | DEFAULT 'sent' | sent | delivered | failed | bounced
+acked_at | TIMESTAMPTZ | NULLABLE | When this specific notification was acknowledged
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 18 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+incident_id | UUID | FK → incidents.id | 
+engineer_id | UUID | FK → engineers.id | Recipient
+channel | VARCHAR(30) | NOT NULL | slack | sms | voice | email
+message_body | TEXT | NOT NULL | Actual message content sent
+external_message_id | VARCHAR(255) | NULLABLE | Slack ts, Twilio SID, SendGrid ID
+status | VARCHAR(30) | DEFAULT 'pending' | pending | sent | delivered | read | failed
+error_message | TEXT | NULLABLE | If delivery failed
+sent_at | TIMESTAMPTZ | NULLABLE | 
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 19 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+team_id | UUID | FK → teams.id | 
+outgoing_engineer_id | UUID | FK → engineers.id | 
+incoming_engineer_id | UUID | FK → engineers.id | 
+shift_id | UUID | FK → rota.id | The rota shift being handed over
+briefing_text | TEXT | NOT NULL | Claude-generated briefing script
+audio_url | TEXT | NULLABLE | S3/storage URL for Whisper TTS audio file
+audio_duration_seconds | INTEGER | NULLABLE | 
+open_incidents_count | INTEGER | DEFAULT 0 | Snapshot at handover time
+resolved_this_shift | INTEGER | DEFAULT 0 | Incidents resolved during outgoing shift
+delivery_status | VARCHAR(30) | DEFAULT 'pending' | pending | delivered | failed
+delivered_at | TIMESTAMPTZ | NULLABLE | 
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 20 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+engineer_id | UUID | FK → engineers.id | 
+unavailable_from | TIMESTAMPTZ | NOT NULL | 
+unavailable_to | TIMESTAMPTZ | NOT NULL | 
+reason | VARCHAR(100) | NULLABLE | holiday | sick | travel | personal
+approved | BOOLEAN | DEFAULT TRUE | Manager can reject if it causes coverage gap
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 21 ---
+Column | Type | Constraints | Description
+id | UUID | PK | 
+org_id | UUID | FK → organisations.id | 
+actor_id | UUID | NULLABLE | engineer_id or NULL for system actions
+actor_type | VARCHAR(20) | NOT NULL | engineer | system | api_key
+action | VARCHAR(100) | NOT NULL | e.g. incident.acknowledged, rota.swap_approved
+entity_type | VARCHAR(50) | NOT NULL | incident | rota | engineer | policy
+entity_id | UUID | NULLABLE | 
+metadata | JSONB | DEFAULT '{}' | Any relevant context for the action
+ip_address | INET | NULLABLE | For engineer-initiated actions
+created_at | TIMESTAMPTZ | DEFAULT NOW() | 
+
+--- Table 22 ---
+Method | Endpoint | Description | Auth
+POST | /api/v1/ingest/{org_slug} | Receive alert webhook from any source | HMAC sig
+GET | /api/v1/incidents | List incidents with filters (status, severity, team) | JWT
+GET | /api/v1/incidents/{id} | Get single incident with full timeline | JWT
+PATCH | /api/v1/incidents/{id}/ack | Acknowledge an incident | JWT
+PATCH | /api/v1/incidents/{id}/resolve | Resolve an incident | JWT
+GET | /api/v1/rota | Get rota for team + week | JWT
+POST | /api/v1/rota/generate | Trigger rota generation for a team + week | JWT (lead)
+POST | /api/v1/rota/swap | Request a rota swap | JWT
+GET | /api/v1/engineers | List engineers in org | JWT
+POST | /api/v1/engineers | Create engineer | JWT (admin)
+PATCH | /api/v1/engineers/{id} | Update engineer (skills, prefs, etc.) | JWT (self/admin)
+GET | /api/v1/handovers | List handover briefings | JWT
+GET | /api/v1/handovers/{id}/audio | Stream handover audio file | JWT
+GET | /api/v1/audit-log | Query audit log with filters | JWT (admin)
+GET | /api/v1/health | Liveness + readiness probe | None
+
+--- Table 23 ---
+Milestone | Target Date | Success Criteria
+M1: Alert → Slack working | End of Week 3 | One real team using it in production for their alerts
+M2: Auto-escalation live | End of Week 6 | Zero escalation misses over 2 weeks of monitoring
+M3: AI routing + voice handover | End of Week 9 | Routing accuracy > 85% vs manual assignment
+M4: Dashboard live | End of Week 12 | Team lead checks dashboard daily instead of Slack log
+M5: First 10 paying teams | End of Week 16 | MRR > $500, < 1 churn in first month
+
+--- Table 24 ---
+Risk | Probability | Impact | Mitigation
+Claude API latency causes delayed routing | Medium | High | 2-second timeout + rota-order fallback. Routing never blocks notification.
+Celery worker crash drops escalation timer | Low | Critical | Persist timer state in DB (not just Redis). Watchdog task re-queues orphaned timers on startup.
+Twilio voice call fails at 3am P1 | Low | Critical | Parallel channels — if voice fails, Slack + SMS already sent. Retry voice call once after 30s.
+Google Calendar OAuth token expires | Medium | Low | Background token refresh task runs daily. Calendar sync failure never blocks alert delivery.
+Multi-tenant data leak via missing RLS | Low | Critical | RLS enabled on all tables. Automated integration test verifies cross-tenant queries return 0 rows.
+Whisper TTS quality degrades on long briefings | Low | Low | Cap briefing length at 200 words. Test across 10 sample shifts before launch.
+Single-region VPS goes down | Low | Critical | For self-hosted: document multi-region Compose setup. For managed: use Fly.io multi-region deploy.
+
+--- Table 25 ---
+Feature | PagerDuty | OpsGenie | OnCall Maestro
+Alert dedup + grace period | Basic | Basic | AI-assisted + configurable
+Routing intelligence | Round-robin only | Round-robin + rules | Claude AI (skill + timezone + history)
+Voice call content | Alert title only | Alert title only | AI-written 45-second context brief
+Shift handover | None | None | AI + Whisper TTS voice briefing
+Rota swap management | Manual | Manual | Automated with Calendar sync
+Self-hosting option | No | No | Yes — full Docker Compose
+Data ownership | Vendor | Atlassian | Yours — PostgreSQL
+Pricing (20 engineers) | $800/mo | $360/mo | ~$80/mo (self-hosted)
+AI-powered features | Limited (add-on) | None | Core product, not add-on
+Open source core | No | No | Yes
+
+--- Table 26 ---
+Variable | Description | Example
+DATABASE_URL | Supabase / Postgres connection string | postgresql+asyncpg://user:pass@host/db
+REDIS_URL | Redis connection string | redis://localhost:6379/0
+ANTHROPIC_API_KEY | Claude API key | sk-ant-...
+OPENAI_API_KEY | Whisper TTS key | sk-...
+SLACK_BOT_TOKEN | Slack bot OAuth token | xoxb-...
+SLACK_SIGNING_SECRET | Webhook signature verification | abc123...
+TWILIO_ACCOUNT_SID | Twilio account ID | ACxxxxxxxx
+TWILIO_AUTH_TOKEN | Twilio auth token | xxxxxxxx
+TWILIO_FROM_NUMBER | Outbound phone number (E.164) | +12025551234
+GOOGLE_CLIENT_ID | Google OAuth client ID | xxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET | Google OAuth secret | GOCSPX-...
+JWT_PRIVATE_KEY | RS256 private key for JWT signing | -----BEGIN RSA PRIVATE KEY-----
+STORAGE_BUCKET_URL | S3-compatible bucket for audio files | https://s3.amazonaws.com/maestro-audio
+SENTRY_DSN | Sentry error tracking DSN | https://xxx@sentry.io/xxx
+MAESTRO_ENV | Deployment environment | production | staging | development
+
+--- Table 27 ---
+Term | Definition
+ACK / Acknowledge | An engineer's confirmation that they have received and are handling an incident.
+Escalation | Automatic reassignment of an incident to a higher-level engineer after the ACK window expires.
+Fingerprint | A hash of an alert's core attributes used to detect duplicate alerts.
+Rota | The on-call schedule — which engineer is responsible during which time window.
+SLA Window | The maximum allowed time between alert fire and engineer ACK before escalation triggers.
+Handover Briefing | An AI-generated audio and text summary delivered to the incoming engineer at shift change.
+Celery Beat | A Celery extension that runs periodic and scheduled tasks (similar to cron).
+RLS | Row Level Security — a PostgreSQL feature that enforces access control at the database row level.
