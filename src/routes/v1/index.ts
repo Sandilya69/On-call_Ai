@@ -9,6 +9,9 @@ import { handoverRoutes } from "./handovers.js";
 import { auditLogRoutes } from "./auditLog.js";
 import { availabilityRoutes } from "./availability.js";
 import { metricsRoutes } from "./metrics.js";
+import { calendarRoutes } from "./calendar.js";
+import { twilioRoutes } from "./twilio.js";
+import { billingRoutes } from "./billing.js";
 
 export async function v1Routes(app: FastifyInstance): Promise<void> {
   await app.register(healthRoutes);
@@ -20,4 +23,7 @@ export async function v1Routes(app: FastifyInstance): Promise<void> {
   await app.register(handoverRoutes);
   await app.register(auditLogRoutes);
   await app.register(availabilityRoutes);
+  await app.register(calendarRoutes);
+  await app.register(twilioRoutes);
+  await app.register(billingRoutes);
 }

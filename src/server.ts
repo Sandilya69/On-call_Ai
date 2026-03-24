@@ -64,6 +64,12 @@ async function buildApp() {
       availability: "GET /api/v1/availability",
       handovers: "GET /api/v1/handovers",
       auditLog: "GET /api/v1/audit-log",
+      calendarAuth: "GET /api/v1/calendar/auth",
+      calendarSync: "POST /api/v1/calendar/sync",
+      billingPlans: "GET /api/v1/billing/plans",
+      billingCheckout: "POST /api/v1/billing/checkout",
+      billingPortal: "POST /api/v1/billing/portal",
+      twilioVoiceAck: "POST /api/v1/twilio/voice-ack",
     },
   }));
 

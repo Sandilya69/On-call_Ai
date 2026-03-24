@@ -33,29 +33,38 @@ async function processNotification(job: Job<NotificationJobData>): Promise<void>
   // 2. SMS via Twilio (for P1/P2)
   if (phone && (severity === "P1" || severity === "P2")) {
     try {
-      const twilioSid = process.env["TWILIO_ACCOUNT_SID"];
-      const twilioToken = process.env["TWILIO_AUTH_TOKEN"];
-      const twilioFrom = process.env["TWILIO_FROM_NUMBER"];
-
-      if (twilioSid && twilioToken && twilioFrom) {
-        const twilio = (await import("twilio")).default;
-        const client = twilio(twilioSid, twilioToken);
-        await client.messages.create({
-          to: phone,
-          from: twilioFrom,
-          body: `🚨 OnCall Maestro [${severity}] ${incident.title} — ${incident.service}. ACK: reply YES or use /ack ${incidentId}`,
-        });
-        channels.push("sms");
-        await prisma.notification.create({
-          data: {
-            incidentId, engineerId, channel: "sms",
-            messageBody: `[${severity}] ${incident.title}`,
-            status: "sent", sentAt: new Date(),
-          },
-        });
-      }
+      const { sendSMS } = await import("../integrations/twilio.js");
+      const sent = await sendSMS(phone, incident);
+      if (sent) channels.push("sms");
+      await prisma.notification.create({
+        data: {
+          incidentId, engineerId, channel: "sms",
+          messageBody: `[${severity}] ${incident.title}`,
+          status: sent ? "sent" : "failed", sentAt: sent ? new Date() : null,
+        },
+      });
     } catch (err) {
       log.error({ err, phone }, "SMS notification failed");
+    }
+  }
+
+  // 3. Voice call via Twilio (P1 only — critical incidents get a phone call)
+  if (phone && severity === "P1") {
+    try {
+      const { placeVoiceCall } = await import("../integrations/twilio.js");
+      const result = await placeVoiceCall(phone, incident);
+      if (result.success) channels.push("voice");
+      await prisma.notification.create({
+        data: {
+          incidentId, engineerId, channel: "voice",
+          messageBody: `[P1 VOICE CALL] ${incident.title}`,
+          externalMessageId: result.callSid || null,
+          status: result.success ? "sent" : "failed",
+          sentAt: result.success ? new Date() : null,
+        },
+      });
+    } catch (err) {
+      log.error({ err, phone }, "Voice call notification failed");
     }
   }
 

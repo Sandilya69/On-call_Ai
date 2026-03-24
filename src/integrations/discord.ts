@@ -286,7 +286,72 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction): Pro
     }
 
     case "briefing": {
-      await interaction.reply({ content: "🔄 Regenerating briefing... (this feature requires Phase 3 workers)" });
+      const eng = await prisma.engineer.findFirst({
+        where: { discordUserId: interaction.user.id },
+      });
+      if (!eng) {
+        await interaction.reply({ content: "❌ Your Discord account is not linked to an engineer profile.", ephemeral: true });
+        return;
+      }
+
+      // Find engineer's current or most recent shift
+      const now = new Date();
+      const currentShift = await prisma.rota.findFirst({
+        where: {
+          engineerId: eng.id,
+          startTime: { lte: now },
+          endTime: { gte: new Date(now.getTime() - 30 * 60 * 1000) }, // within 30 min of end
+          status: { in: ["scheduled", "active"] },
+        },
+        include: { team: true },
+        orderBy: { endTime: "desc" },
+      });
+
+      if (!currentShift) {
+        await interaction.reply({ content: "❌ No active or recent shift found for you.", ephemeral: true });
+        return;
+      }
+
+      // Find the next engineer on the rota for this team
+      const nextShift = await prisma.rota.findFirst({
+        where: {
+          teamId: currentShift.teamId,
+          startTime: { gte: currentShift.endTime },
+          status: { in: ["scheduled"] },
+        },
+        include: { engineer: true },
+        orderBy: { startTime: "asc" },
+      });
+
+      const incomingEngineerId = nextShift?.engineerId || eng.id; // fallback to self
+
+      // Queue handover briefing job
+      const { handoverQueue } = await import("../workers/queues.js");
+      if (handoverQueue) {
+        await handoverQueue.add(`briefing:${currentShift.id}`, {
+          shiftId: currentShift.id,
+          teamId: currentShift.teamId,
+          outgoingEngineerId: eng.id,
+          incomingEngineerId,
+        });
+
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("🔄 Briefing Queued")
+              .setDescription(`Generating handover briefing for **${currentShift.team.name}**`)
+              .setColor(Colors.Purple)
+              .addFields(
+                { name: "Outgoing", value: eng.name, inline: true },
+                { name: "Incoming", value: nextShift?.engineer?.name || "TBD", inline: true },
+              )
+              .setFooter({ text: "You'll receive a DM when it's ready" })
+              .setTimestamp(),
+          ],
+        });
+      } else {
+        await interaction.reply({ content: "⚠️ Briefing service unavailable (Redis not connected).", ephemeral: true });
+      }
       break;
     }
 

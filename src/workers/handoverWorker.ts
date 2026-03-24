@@ -98,14 +98,25 @@ async function processHandover(job: Job<HandoverJobData>): Promise<void> {
       `${resolvedThisShift.length} incidents were resolved this shift.`;
   }
 
-  // 5. Generate TTS audio
+  // 5. Generate TTS audio and upload to S3
   let audioUrl: string | undefined;
   let audioDuration = 0;
   try {
     const outputDir = path.resolve("storage/handovers");
     const ttsResult = await generateSpeech(briefingText, outputDir);
-    audioUrl = ttsResult.filePath;
     audioDuration = ttsResult.durationEstimate;
+
+    // Upload to S3 if audio was generated
+    if (ttsResult.audioBuffer.length > 0) {
+      const { uploadAudio } = await import("../integrations/s3.js");
+      const s3Result = await uploadAudio(ttsResult.audioBuffer, {
+        handoverId: `${shiftId}-${Date.now()}`,
+        teamId,
+      });
+      audioUrl = s3Result?.url || ttsResult.filePath;
+    } else {
+      audioUrl = ttsResult.filePath;
+    }
   } catch (err) {
     log.error({ err }, "TTS generation failed — continuing without audio");
   }
