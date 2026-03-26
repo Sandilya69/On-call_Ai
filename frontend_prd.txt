@@ -1,0 +1,1343 @@
+FRONTEND ENGINEERING DOCUMENT
+OnCall Maestro
+Frontend PRD — Next.js / TypeScript
+Framework
+Next.js 14
+Language
+TypeScript (strict)
+Styling
+Tailwind CSS
+Deploy
+Vercel
+Version 1.0  ·  March 2026  ·  Confidential
+1. Design Philosophy
+OnCall Maestro's frontend is built for engineers who use it under pressure — at 3am, during production incidents, half-asleep. Every design decision serves one goal: get the engineer the information they need and the action they need to take in under 3 seconds. Nothing decorative. Nothing in the way.
+1.1 Design Inspiration — Multi-Source Approach
+The design borrows specific patterns from multiple best-in-class developer tools. No single source is copied — specific elements from each are combined into a system that feels familiar but is distinctly Maestro.
+Inspiration Source
+What We Borrow
+What We Change
+Linear (linear.app)
+Keyboard-first navigation, ultra-dense data tables, zero padding on list items, instant search
+Linear uses purple brand — we use your color. Linear is project mgmt — we adapt density for alert triage
+Vercel Dashboard
+Status indicators, deployment timeline rows, monospace metadata, clean header with breadcrumbs
+Vercel is light mode first — we are dark mode first. Their cards are too spaced for our density needs
+Raycast (raycast.com)
+Command palette design, keyboard shortcut badges, result list hover states, compact icon+text rows
+Raycast is a launcher — we adapt their list pattern for incident lists and search
+PlanetScale Dashboard
+Database row styling, connection string masked reveal, status badge system, metric cards
+PlanetScale's nav is too heavy — we strip it down. We take their badge language for severity tags
+Resend (resend.com)
+Log viewer pattern, monospace event timeline, minimal sidebar, clean empty states
+Resend's color palette is too neutral — we need severity colors to communicate urgency instantly
+Clerk Dashboard
+Team member rows, permission badges, avatar + name + role pattern, settings page layout
+Clerk's tables are spaced for non-technical users — we tighten everything for SRE density
+1.2 Design Principles — Non-Negotiable
+Density over breathing room: Engineers need to see 20 incidents at a glance, not 5. Default table rows are 36px tall, not 56px. No wasted whitespace between data rows.
+Status is always visible: Severity badges (P1/P2/P3/P4) and status indicators (FIRING/ACK/RESOLVED) are the most important elements on any page. They are always the highest contrast element in their row.
+Keyboard first: Every action has a keyboard shortcut. Power users never touch the mouse. K to open command palette, J/K to navigate lists, A to acknowledge, R to resolve, E to escalate.
+Monospace for data: Timestamps, IDs, API keys, fingerprints, durations — all monospace. Regular text for labels and descriptions. This visual distinction makes scanning fast.
+No decorative elements: No gradients on cards. No shadows on everything. No rounded-2xl on buttons. Flat, sharp, functional. Rounded corners only where they aid hierarchy.
+Dark mode is the default: Engineers look at dashboards in dark environments. Dark mode is not a toggle — it is the designed state. Light mode can be added later but is not v1.
+Empty states are helpful: When a table is empty it does not just say 'No results'. It explains why and what to do next. Every empty state has an action.
+2. Frontend Technology Stack
+Layer
+Package
+Version
+Purpose
+Framework
+Next.js
+14 (App Router)
+SSR + routing + API routes
+Language
+TypeScript
+5.x strict
+Full type safety
+Styling
+Tailwind CSS
+3.x
+Utility-first, no custom CSS
+Components
+shadcn/ui
+latest
+Headless, unstyled base components
+Icons
+Lucide React
+latest
+Consistent icon system
+Data Fetching
+TanStack Query
+5.x
+Server state, caching, real-time sync
+Forms
+React Hook Form + Zod
+7.x / 3.x
+Same Zod schemas as backend
+Auth
+Supabase Auth
+2.x
+Login, session management
+Real-time
+Supabase Realtime
+2.x
+Live incident status updates
+Tables
+TanStack Table
+8.x
+Sortable, filterable, dense tables
+Charts
+Recharts
+2.x
+Incident analytics, rota calendar
+Date handling
+date-fns
+3.x
+Format timestamps, durations
+HTTP Client
+Axios
+1.x
+API calls to Fastify backend
+State (local)
+Zustand
+4.x
+UI state, command palette, toasts
+Hotkeys
+useHotkeys
+4.x
+Keyboard shortcut bindings
+Audio
+HTML5 Audio API
+native
+Handover audio playback
+Hosting
+Vercel
+latest
+Zero-config Next.js deployment
+3. Project Structure
+oncall-maestro-frontend/
+├── app/                                  ← Next.js App Router
+│   ├── (auth)/
+│   │   ├── login/page.tsx                ← Login page
+│   │   └── layout.tsx                    ← Auth layout (no sidebar)
+│   ├── (dashboard)/
+│   │   ├── layout.tsx                    ← Dashboard layout (sidebar + header)
+│   │   ├── page.tsx                      ← / redirect to /dashboard
+│   │   ├── dashboard/page.tsx            ← Main dashboard
+│   │   ├── incidents/
+│   │   │   ├── page.tsx                  ← Incidents list
+│   │   │   └── [id]/page.tsx             ← Incident detail
+│   │   ├── rota/page.tsx                 ← Rota calendar
+│   │   ├── engineers/page.tsx            ← Team management
+│   │   ├── handovers/
+│   │   │   ├── page.tsx                  ← Handover history
+│   │   │   └── [id]/page.tsx             ← Handover detail + audio
+│   │   └── settings/
+│   │       ├── page.tsx                  ← Settings overview
+│   │       ├── escalation/page.tsx       ← Escalation policy config
+│   │       └── integrations/page.tsx     ← Slack / Twilio / Calendar config
+│   ├── api/
+│   │   └── auth/[...nextauth]/route.ts   ← Supabase auth handler
+│   ├── layout.tsx                        ← Root layout
+│   └── globals.css                       ← Tailwind base + CSS variables
+├── components/
+│   ├── layout/
+│   │   ├── Sidebar.tsx                   ← Left navigation
+│   │   ├── Header.tsx                    ← Top bar with breadcrumb + user
+│   │   └── CommandPalette.tsx            ← Global K shortcut overlay
+│   ├── incidents/
+│   │   ├── IncidentTable.tsx             ← Dense sortable table
+│   │   ├── IncidentRow.tsx               ← Single table row
+│   │   ├── IncidentBadge.tsx             ← P1/P2/P3/P4 severity badge
+│   │   ├── StatusBadge.tsx               ← FIRING/ACK/RESOLVED badge
+│   │   ├── IncidentTimeline.tsx          ← Timeline for detail page
+│   │   ├── AckButton.tsx                 ← One-click acknowledge
+│   │   └── EscalationTimer.tsx           ← Countdown to escalation
+│   ├── rota/
+│   │   ├── RotaCalendar.tsx              ← Weekly calendar view
+│   │   ├── RotaSlotCard.tsx              ← Engineer shift card
+│   │   └── SwapRequestModal.tsx          ← Swap request form
+│   ├── engineers/
+│   │   ├── EngineerTable.tsx             ← Team member list
+│   │   ├── EngineerRow.tsx               ← Avatar + name + skills row
+│   │   ├── SkillTagBadge.tsx             ← Skill tag pill
+│   │   └── AddEngineerModal.tsx          ← Add team member form
+│   ├── handovers/
+│   │   ├── HandoverCard.tsx              ← Handover summary card
+│   │   └── AudioPlayer.tsx               ← Custom audio player
+│   ├── dashboard/
+│   │   ├── MetricCard.tsx                ← Stat card
+│   │   ├── OnCallWidget.tsx              ← Current on-call engineer
+│   │   ├── ActiveIncidentsFeed.tsx       ← Live P1/P2 feed
+│   │   └── RecentActivity.tsx            ← Activity log
+│   └── ui/                               ← shadcn/ui base components
+│       ├── button.tsx
+│       ├── badge.tsx
+│       ├── table.tsx
+│       ├── dialog.tsx
+│       ├── input.tsx
+│       ├── select.tsx
+│       ├── toast.tsx
+│       └── tooltip.tsx
+├── lib/
+│   ├── api.ts                            ← Axios instance + interceptors
+│   ├── supabase.ts                       ← Supabase client
+│   ├── queryClient.ts                    ← TanStack Query config
+│   └── utils.ts                          ← cn(), formatDuration(), etc
+├── hooks/
+│   ├── useIncidents.ts                   ← TanStack Query for incidents
+│   ├── useRota.ts                        ← TanStack Query for rota
+│   ├── useEngineers.ts                   ← TanStack Query for engineers
+│   ├── useRealtime.ts                    ← Supabase Realtime subscription
+│   └── useCommandPalette.ts              ← Command palette state
+├── store/
+│   └── ui.store.ts                       ← Zustand for UI state
+├── types/
+│   └── api.types.ts                      ← Shared types mirroring backend
+├── tailwind.config.ts
+├── next.config.ts
+└── tsconfig.json
+4. Color System — You Decide
+Important Note on Colors
+This document intentionally leaves all brand colors blank. The CSS variable names and their roles are defined below. You fill in the actual hex values. Every component references these variables — change the variable, the entire app updates.
+4.1 CSS Variables — globals.css
+/* app/globals.css */
+:root {
+  /* ── Brand Colors — YOU FILL THESE IN ── */
+  --color-brand-primary:      /* your main brand color */;
+  --color-brand-secondary:    /* your secondary brand color */;
+  --color-brand-accent:       /* highlight / CTA color */;
+  /* ── Background Layers ── */
+  --color-bg-base:            /* darkest — page background */;
+  --color-bg-surface:         /* cards, panels, sidebar */;
+  --color-bg-elevated:        /* modals, dropdowns, tooltips */;
+  --color-bg-subtle:          /* table row hover, input bg */;
+  /* ── Text ── */
+  --color-text-primary:       /* main body text */;
+  --color-text-secondary:     /* labels, descriptions */;
+  --color-text-muted:         /* placeholders, timestamps */;
+  --color-text-inverse:       /* text on dark buttons */;
+  /* ── Borders ── */
+  --color-border-default:     /* table borders, card borders */;
+  --color-border-strong:      /* focused input, selected rows */;
+  --color-border-subtle:      /* dividers, section separators */;
+  /* ── Severity — FIXED — do not change these ── */
+  --color-p1:        #EF4444;   /* P1 critical — always red */
+  --color-p1-bg:     #1C0A0A;   /* P1 badge background */
+  --color-p2:        #F97316;   /* P2 high — always orange */
+  --color-p2-bg:     #1C0D05;
+  --color-p3:        #EAB308;   /* P3 medium — always yellow */
+  --color-p3-bg:     #1C1505;
+  --color-p4:        #22C55E;   /* P4 low — always green */
+  --color-p4-bg:     #051C0D;
+  /* ── Status — FIXED ── */
+  --color-firing:    #EF4444;
+  --color-acked:     #3B82F6;
+  --color-resolved:  #22C55E;
+  --color-suppressed:#64748B;
+  /* ── Interactive ── */
+  --color-focus-ring:         /* keyboard focus ring color */;
+  --color-interactive-hover:  /* button/row hover bg */;
+  --color-interactive-active: /* button/row active/pressed bg */;
+  /* ── Typography ── */
+  --font-sans:       /* your body font — import from Google Fonts */;
+  --font-mono:       /* your monospace — Geist Mono recommended */;
+  --font-display:    /* headings / page titles */;
+}
+4.2 Color Role Reference
+Color Role
+CSS Variable
+Value
+Used For
+Brand Primary
+--color-brand-primary
+← You decide
+Brand identity, active nav items, primary buttons
+Brand Secondary
+--color-brand-secondary
+← You decide
+Secondary buttons, hover highlights
+Brand Accent
+--color-brand-accent
+← You decide
+CTAs, important actions, focus rings
+BG Base
+--color-bg-base
+← You decide
+Page background — darkest layer
+BG Surface
+--color-bg-surface
+← You decide
+Sidebar, cards, table background
+BG Elevated
+--color-bg-elevated
+← You decide
+Modals, dropdowns, command palette
+BG Subtle
+--color-bg-subtle
+← You decide
+Row hover, input background
+Text Primary
+--color-text-primary
+← You decide
+Main readable text
+Text Secondary
+--color-text-secondary
+← You decide
+Labels, metadata, helper text
+Text Muted
+--color-text-muted
+← You decide
+Timestamps, IDs, placeholders
+Border Default
+--color-border-default
+← You decide
+Table borders, card outlines
+Border Strong
+--color-border-strong
+← You decide
+Focused inputs, selected rows
+Font Recommendation (you choose the final font)
+For sans: Geist (Vercel's font) or Inter or Plus Jakarta Sans.
+For mono: Geist Mono or JetBrains Mono or IBM Plex Mono.
+For display (page titles only): any of the above at bold weight works — or a different display font entirely.
+All three are free on Google Fonts or Vercel Fonts.
+5. Layout System
+5.1 Shell Layout
+The app shell is a 3-zone layout: fixed left sidebar, fixed top header, scrollable main content. This pattern is taken from Linear and Vercel — it keeps navigation always accessible without moving.
+// components/layout/DashboardLayout.tsx
+┌─────────────────────────────────────────────────────┐
+│  HEADER  (height: 48px, fixed top, full width)      │
+│  Breadcrumb left · Search center · User avatar right│
+├──────────┬──────────────────────────────────────────┤
+│          │                                          │
+│ SIDEBAR  │   MAIN CONTENT                          │
+│ 220px    │   flex-1, overflow-y-auto               │
+│ fixed    │   padding: 24px 32px                    │
+│          │                                          │
+│ Nav      │   Page content renders here             │
+│ items    │                                          │
+│          │                                          │
+│ ─────    │                                          │
+│ User     │                                          │
+│ section  │                                          │
+└──────────┴──────────────────────────────────────────┘
+5.2 Sidebar Design
+Inspired by Linear's sidebar — compact, no icons-only mode in v1, always shows label. Active item has a left border accent, not a background fill. This avoids the 'pill nav' look that every generic dashboard uses.
+Sidebar structure:
+  [Logo + wordmark]
+  ─────────────────
+  ⬡  Dashboard
+  ▣  Incidents       [badge: count of active P1/P2]
+  ◫  Rota
+  ◉  Engineers
+  ◈  Handovers
+  ─────────────────
+  ⚙  Settings
+  ─────────────────
+  [Avatar] Priya Nair
+           Senior SRE ↓
+Active state:  left border 2px [brand-primary] + bg subtle
+Hover state:   bg subtle only, no border
+Font size:     13px, font-medium
+Item height:   32px
+Padding:       8px 12px
+5.3 Header Design
+Inspired by Vercel's dashboard header — very minimal. Left side shows breadcrumb. Center is empty or has page search. Right has command palette trigger and user avatar.
+Header structure (48px height, border-bottom: 1px border-default):
+  [Team name] / [Current page]      [⌘K]  [🔔]  [Avatar]
+  ←── Breadcrumb (14px mono) ──→           ←── Actions ──→
+⌘K button: opens command palette (see Section 9)
+🔔 bell: shows count of unread escalation notifications
+Avatar: dropdown with profile, settings, sign out
+6. Page-by-Page Specification
+6.1 Dashboard Page — /dashboard
+The first page engineers see after login. Design inspired by PlanetScale's metric cards + Linear's activity feed. Dense, no empty space, everything actionable.
+6.1.1 Layout
+┌─────────────────────────────────────────────────────────┐
+│  PAGE TITLE: Dashboard          [Generate Handover btn] │
+├─────────────┬─────────────┬─────────────┬──────────────┤
+│ METRIC CARD │ METRIC CARD │ METRIC CARD │ METRIC CARD  │
+│ Active P1s  │ MTTA avg    │ On-call now │ Open total   │
+│   [count]   │  [4.2 min]  │  [name]     │  [count]     │
+├─────────────┴─────────────┼─────────────┴──────────────┤
+│                           │                            │
+│  ACTIVE INCIDENTS FEED    │   RECENT ACTIVITY LOG      │
+│  (live, real-time)        │   (last 20 events)         │
+│  P1/P2 only               │   routed/acked/resolved    │
+│                           │                            │
+└───────────────────────────┴────────────────────────────┘
+6.1.2 Metric Card Component
+// components/dashboard/MetricCard.tsx
+// Inspired by PlanetScale metric cards — no border-radius on outer card
+// Sharp corners, monospace numbers, muted label above
+<div className='border border-border-default bg-bg-surface p-4 w-full'>
+  <p className='text-xs font-medium text-text-muted uppercase tracking-wider'>
+    Active P1 Incidents
+  </p>
+  <p className='text-3xl font-bold font-mono text-text-primary mt-1'>
+    {count}
+  </p>
+  <p className='text-xs text-text-muted mt-1'>
+    ↑ 2 from last hour
+  </p>
+</div>
+// 4 cards in a grid: grid-cols-4 gap-0 (no gap — they share borders)
+// Cards share borders with each other and the section below
+// This creates a seamless grid look — inspired by Linear's stats bar
+6.1.3 Active Incidents Feed
+// Real-time via Supabase Realtime subscription
+// Shows only FIRING incidents with severity P1 or P2
+// Each row: [severity badge] [title] [service] [time] [assignee] [ACK button]
+Row height: 40px
+P1 rows:    left border 2px var(--color-p1) + bg var(--color-p1-bg)
+P2 rows:    left border 2px var(--color-p2) + bg var(--color-p2-bg)
+If no active P1/P2 incidents:
+  Empty state: green checkmark icon + 'All clear. No active P1/P2 incidents.'
+  No suggestions, no CTAs — just the status.
+6.1.4 On-Call Widget
+// Prominent card showing who is on call RIGHT NOW
+// Inspired by Clerk's user card pattern
+┌────────────────────────────────────┐
+│ ON CALL NOW              [Swap →]  │
+│ ┌──┐                              │
+│ │PN│  Priya Nair                  │
+│ └──┘  Senior SRE                  │
+│       UTC+5:30 · 14:32 local      │
+│                                   │
+│ NEXT SHIFT IN  6h 22m             │
+│ Lucas Ferreira                    │
+└────────────────────────────────────┘
+Avatar: 32x32 initials circle, bg var(--color-brand-primary)
+Local time: updates every minute
+'Swap →' link: opens swap modal
+6.2 Incidents Page — /incidents
+The most used page in the app. Design inspired by Linear's issue list — ultra-dense, keyboard navigable, instant filter. Engineers spend most of their time here.
+6.2.1 Page Layout
+┌────────────────────────────────────────────────────────────┐
+│ Incidents                                  [+ New Incident]│
+├──────────────────────────────────────────────────────────┬─┤
+│ [All] [Firing] [Acknowledged] [Resolved]   [Search...] ⌘F │ │
+├──────┬──────────────────────┬─────────┬──────┬───────────┤ │
+│ SEV  │ TITLE                │ SERVICE │ TIME │ ASSIGNEE  │ │
+├──────┼──────────────────────┼─────────┼──────┼───────────┤ │
+│ [P1] │ DB replica lag > 30s │ pg-prod │ 4m   │ P. Nair   │ │
+│ [P1] │ API p99 spike        │ gateway │ 12m  │ P. Nair   │ │
+│ [P2] │ Memory usage > 90%   │ worker  │ 34m  │ L. Ferr.  │ │
+│ [P3] │ Disk usage > 85%     │ node-07 │ 2h   │ S. Park   │ │
+│      │    ...               │         │      │           │ │
+└──────┴──────────────────────┴─────────┴──────┴───────────┘ │
+                                              Scroll indicator│
+6.2.2 Table Design
+Row height:     36px (not 48px — density is a feature)
+Row hover:      bg var(--color-bg-subtle)
+Row selected:   bg var(--color-bg-subtle) + left border 2px brand-accent
+Row P1 firing:  subtle pulsing left border animation (CSS only, no JS)
+Columns:
+  SEV        56px   fixed   Severity badge [P1][P2][P3][P4]
+  TITLE      flex   grow    Incident title, truncated with ellipsis
+  SERVICE    140px  fixed   Service name in monospace, muted
+  DURATION   80px   fixed   '4m', '2h 12m' in monospace
+  ASSIGNEE   120px  fixed   Avatar + first name only
+  STATUS     100px  fixed   [FIRING][ACKED][RESOLVED] badge
+  ACTIONS    80px   fixed   visible on row hover only
+Sortable: SEV, DURATION, STATUS (click column header)
+Default sort: severity ASC then firstFiredAt DESC
+Keyboard navigation:
+  J / K          move selection up/down
+  Enter          open incident detail
+  A              acknowledge selected incident
+  R              resolve selected incident
+  /              focus search
+6.2.3 Severity Badge Design
+// components/incidents/IncidentBadge.tsx
+// Inspired by PlanetScale's status badges — small, dense, no icon
+const config = {
+  1: { label: 'P1', color: 'text-[var(--color-p1)]', bg: 'bg-[var(--color-p1-bg)]', border: 'border-[var(--color-p1)]/30' },
+  2: { label: 'P2', color: 'text-[var(--color-p2)]', bg: 'bg-[var(--color-p2-bg)]', border: 'border-[var(--color-p2)]/30' },
+  3: { label: 'P3', color: 'text-[var(--color-p3)]', bg: 'bg-[var(--color-p3-bg)]', border: 'border-[var(--color-p3)]/30' },
+  4: { label: 'P4', color: 'text-[var(--color-p4)]', bg: 'bg-[var(--color-p4-bg)]', border: 'border-[var(--color-p4)]/30' },
+};
+// Badge: 40px wide, 20px tall, font-mono font-bold text-xs
+// Upper case label. Tight padding. Sharp corners (rounded-sm only).
+// The severity color is the ONLY color on the row — everything else muted.
+6.3 Incident Detail Page — /incidents/[id]
+Full incident context in one page. Design inspired by Linear's issue detail and Vercel's deployment detail — left content, right metadata panel.
+┌─────────────────────────────────────────┬──────────────────┐
+│ ← Back to incidents                     │ METADATA         │
+│                                         │                  │
+│ [P1] DB replica lag > 30s               │ Status  [FIRING] │
+│      FIRING · postgres-prod · 4m ago    │ Sev     P1       │
+│                                         │ Service pg-prod  │
+│ [ACK]  [Resolve]  [Escalate]  [Snooze]  │ Assigned Priya N │
+│                                         │ Fired   14:32:01 │
+├─────────────────────────────────────────│ Duration 4m 22s  │
+│ DESCRIPTION                             │                  │
+│ Replica lag exceeded 30s threshold...   │ LABELS           │
+│                                         │ env: prod        │
+│ RUNBOOK                                 │ region: us-east  │
+│ → View Postgres Lag Runbook             │                  │
+├─────────────────────────────────────────│ ESCALATES IN     │
+│ TIMELINE                                │ [====----] 1:22  │
+│                                         │                  │
+│ 14:36  Routing · Claude assigned P.Nair │ BACKUP CHAIN     │
+│ 14:36  Notified · Slack DM sent         │ 1. Priya Nair    │
+│ 14:35  Notified · SMS sent              │ 2. Lucas Ferr.   │
+│ 14:32  Created · Alert ingested         │ 3. Manager       │
+└─────────────────────────────────────────┴──────────────────┘
+6.3.1 Escalation Timer Component
+// components/incidents/EscalationTimer.tsx
+// Linear progress bar showing time until escalation
+// Updates every second via useEffect + setInterval
+const slaMs = { 1: 300000, 2: 900000, 3: 3600000, 4: 14400000 };
+// When < 20% time remaining: bar color switches to var(--color-p1)
+// When < 10% time remaining: bar pulses (CSS animation)
+// When acknowledged: bar disappears, replaced with 'ACK'd ✓' in green
+Bar height:   4px
+Bar bg:       var(--color-border-subtle)
+Bar fill:     var(--color-brand-accent) → var(--color-p1) when critical
+Text below:   'Escalates in 1:22' in monospace text-muted
+6.4 Rota Page — /rota
+Weekly calendar view of who is on-call. Design inspired by Calendly's week view but much denser — built for SRE teams not scheduling meetings.
+┌──────────────────────────────────────────────────────────┐
+│ Rota Schedule          ← Mar 24–30, 2026 →  [+ Add Slot]│
+├───────┬────────┬────────┬────────┬────────┬──────┬──────┤
+│  MON  │  TUE  │  WED  │  THU  │  FRI  │ SAT  │ SUN  │
+│  24   │  25   │  26   │  27   │  28   │  29  │  30  │
+├───────┼────────┼────────┼────────┼────────┼──────┼──────┤
+│ [PN]  │ [PN]  │ [LF]  │ [SP]  │ [OH]  │ [IM] │ [LF] │
+│Priya N│Priya N│Lucas F│Seo-y.P│Omar H │Ines M│Lucas │
+│9am-9am│9am-9am│9am-9am│9am-9am│9am-9am│      │      │
+├───────┼────────┼────────┼────────┼────────┼──────┼──────┤
+│TODAY  │       │       │       │       │      │      │
+└───────┴────────┴────────┴────────┴────────┴──────┴──────┘
+Today column: subtle background highlight
+On-call card: avatar initials circle + name + shift time
+Click card: opens engineer detail sidebar
+Swap button: on card hover — 'Request swap'
+6.5 Engineers Page — /engineers
+Team member management. Design inspired by Clerk's users table — dense, searchable, with inline editing.
+┌──────────────────────────────────────────────────────────┐
+│ Engineers (7)                          [+ Add Engineer]  │
+│ [Search engineers...]                                    │
+├─────┬──────────────┬──────────────────┬───────┬─────────┤
+│     │ NAME / ROLE  │ SKILLS           │  TZ   │ STATUS  │
+├─────┼──────────────┼──────────────────┼───────┼─────────┤
+│ [PN]│ Priya Nair   │ [postgres][rds]  │UTC+5.5│ ON-CALL │
+│     │ Senior SRE   │ [query-opt] +2   │       │         │
+├─────┼──────────────┼──────────────────┼───────┼─────────┤
+│ [LF]│ Lucas Ferr.  │ [node][react]    │ UTC-3 │ STANDBY │
+│     │ Backend Eng  │ [typescript]     │       │         │
+└─────┴──────────────┴──────────────────┴───────┴─────────┘
+Skills: shown as pill badges, max 3 visible, '+N more' overflow
+Status: ON-CALL (brand-primary), STANDBY (muted), OFF (muted)
+Click row: opens slide-over panel with full engineer details
+Slide-over: edit skills, contacts, timezone, view their incidents
+6.6 Handovers Page — /handovers
+History of all shift handovers with audio playback. Design inspired by Resend's email log viewer.
+┌──────────────────────────────────────────────────────────┐
+│ Shift Handovers                                          │
+├──────────────┬──────────────┬────────────┬──────────────┤
+│ DATE         │ FROM → TO    │ ITEMS      │ AUDIO        │
+├──────────────┼──────────────┼────────────┼──────────────┤
+│ Today 09:00  │ Priya→Lucas  │ 3 open     │ ▶ 0:42       │
+│ Yesterday... │ Lucas→Priya  │ 1 open     │ ▶ 0:28       │
+│ Mar 23 09:00 │ Priya→Lucas  │ 0 open     │ ▶ 0:18       │
+└──────────────┴──────────────┴────────────┴──────────────┘
+▶ button: inline audio player expands below the row
+Click row: full detail page with briefing text + audio
+Audio player: custom minimal design — play/pause + scrubber + time
+No third-party audio library — native HTML5 Audio API
+7. Core Component Specifications
+7.1 Typography Scale
+Token
+Size
+Weight
+Used For
+text-display
+24px
+700
+Page titles (h1)
+text-title
+18px
+600
+Section headings, card titles
+text-body
+14px
+400
+Main body text, descriptions
+text-small
+13px
+400
+Table cell content, labels
+text-xs
+12px
+400
+Badges, timestamps, metadata
+text-mono-sm
+13px mono
+400
+IDs, timestamps, durations, fingerprints
+text-mono-xs
+12px mono
+400
+API keys, hashes, short codes
+7.2 Spacing Scale
+Tailwind's default spacing scale is used throughout. Key decisions for Maestro's dense design:
+Page padding:        px-8 py-6  (32px / 24px)
+Section gap:         gap-6      (24px between sections)
+Card padding:        p-4        (16px — tighter than typical)
+Table row height:    h-9        (36px — dense)
+Table cell padding:  px-3 py-0  (12px horizontal, 0 vertical — row height handles it)
+Sidebar item:        px-3 py-2  (12px / 8px)
+Badge padding:       px-2 py-0.5 (8px / 2px)
+Modal padding:       p-6        (24px)
+Input height:        h-8        (32px)
+Button height:       h-8        (32px) or h-7 (28px) for compact
+7.3 Button System
+// Four variants — no gradients, flat design
+PRIMARY:    bg brand-primary, text white, hover: 90% opacity
+            Used for: main CTA actions (Save, Create, Generate)
+SECONDARY:  bg transparent, border border-default, text primary
+            hover: bg bg-subtle
+            Used for: secondary actions (Cancel, Back)
+DESTRUCTIVE:bg transparent, border border-p1/30, text p1
+            hover: bg p1-bg
+            Used for: Delete, Escalate Now
+GHOST:      bg transparent, no border, text secondary
+            hover: bg bg-subtle
+            Used for: icon buttons, nav items
+All buttons: rounded-sm (2px), h-8 (32px), text-sm font-medium
+Focus: ring-2 ring-offset-2 ring-brand-accent (keyboard navigation)
+Loading: spinner replaces label, button disabled, no width shift
+7.4 Toast / Notification System
+// Position: bottom-right, stack upward
+// Duration: 4 seconds default, persist for errors
+// Max visible: 3 toasts at once
+SUCCESS:  left border 2px var(--color-p4)  + icon ✓
+          'Incident INC-4421 acknowledged'
+ERROR:    left border 2px var(--color-p1) + icon ✕
+          'Failed to send notification — retrying'
+INFO:     left border 2px var(--color-brand-accent) + icon ℹ
+          'Shift handover generated and sent to Lucas'
+WARNING:  left border 2px var(--color-p3) + icon ⚠
+          'Lucas Ferreira is showing as OOO — escalating to next'
+All toasts: bg bg-elevated, no shadow, sharp corners
+Dismiss: click anywhere on toast or X button
+8. Animations & Micro-interactions
+Animations are functional — they communicate state changes, not decorate. Every animation has a purpose. No animations purely for visual effect.
+Element
+Animation
+Duration
+Purpose
+P1 row left border
+pulse (opacity)
+1.4s infinite
+Communicates urgency of active P1
+Escalation timer bar
+width transition
+1s linear
+Real-time countdown feels live
+Status badge change
+fade in
+150ms ease
+ACK/resolve state change
+Row hover
+bg transition
+100ms ease
+Instant response feels snappy
+Toast appear
+slide up + fade
+200ms ease-out
+Not jarring, not slow
+Modal open
+fade + scale 98%→100%
+150ms ease-out
+Feels native, not bouncy
+Page transition
+fade
+100ms
+Instant navigation feel
+New incident row
+slide in from top
+200ms ease-out
+Real-time insert is visible
+Resolved row
+strikethrough + fade
+300ms ease
+Clear visual completion
+Command palette open
+fade + scale 97%→100%
+120ms ease-out
+Snappy, premium feel
+Animation Rule
+All durations under 200ms feel instant. 200-400ms is 'feels smooth'. Over 400ms feels slow. Default to 150ms for UI feedback, 200ms for appearing elements. Never use bounce or spring easing on a tool used during production incidents — it feels disrespectful to the urgency.
+9. Command Palette — ⌘K
+The command palette is the power user's home. Inspired by Raycast's launcher and Linear's command menu. Press K (or Ctrl+K) anywhere in the app.
+┌─────────────────────────────────────────────────────┐
+│  🔍  Search commands...                        esc  │
+├─────────────────────────────────────────────────────┤
+│  INCIDENTS                                          │
+│  ⬡  Acknowledge INC-4421 (DB replica lag)      A   │
+│  ⬡  Resolve INC-4421                           R   │
+│  ⬡  Escalate INC-4421 now                      E   │
+│                                                     │
+│  NAVIGATION                                         │
+│  ▣  Go to Dashboard                            G D  │
+│  ▣  Go to Incidents                            G I  │
+│  ▣  Go to Rota                                 G R  │
+│                                                     │
+│  ACTIONS                                            │
+│  ◎  Create new incident                        C    │
+│  ◎  Request rota swap                               │
+│  ◎  Preview handover briefing                       │
+│  ◎  Generate rota for next week                     │
+└─────────────────────────────────────────────────────┘
+Width:       640px max, centered
+Position:    top 20% of screen
+Background:  bg-elevated with backdrop-blur
+Border:      1px border-strong
+Results:     max 8 visible, scrollable
+Selection:   J/K or arrow keys, Enter to execute
+10. Real-Time Updates
+Four things update in real-time without page refresh. All powered by Supabase Realtime listening to Postgres row changes.
+What Updates
+Trigger
+How It Looks
+Incident status
+DB row status change
+Badge animates from FIRING → ACKED in 150ms
+New incident appears
+DB INSERT on incidents
+Row slides in from top of table
+Dashboard P1/P2 count
+DB status change
+Counter ticks down, green if zero
+Escalation timer
+Client-side interval
+Countdown ticks every second — no server call
+// hooks/useRealtime.ts
+import { useEffect } from 'react';
+import { supabase }  from '@/lib/supabase';
+import { useQueryClient } from '@tanstack/react-query';
+export function useIncidentRealtime(teamId: string) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const channel = supabase
+      .channel(`incidents-${teamId}`)
+      .on('postgres_changes', {
+        event:  '*',
+        schema: 'public',
+        table:  'Incident',
+        filter: `teamId=eq.${teamId}`,
+      }, (payload) => {
+        // Invalidate and refetch incidents query
+        queryClient.invalidateQueries({ queryKey: ['incidents', teamId] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [teamId, queryClient]);
+}
+11. Authentication
+Auth is handled by Supabase Auth. Login page is the only page without the sidebar layout. Simple, functional, no marketing copy.
+Login page design (inspired by Vercel's login page):
+┌─────────────────────────────────────┐
+│                                     │
+│         🎛 OnCall Maestro           │
+│                                     │
+│   ┌─────────────────────────────┐   │
+│   │  Email                      │   │
+│   └─────────────────────────────┘   │
+│   ┌─────────────────────────────┐   │
+│   │  Password            [show] │   │
+│   └─────────────────────────────┘   │
+│                                     │
+│   [      Sign in      ]             │
+│                                     │
+│   ─────── or ──────────             │
+│                                     │
+│   [G  Continue with Google]         │
+│                                     │
+└─────────────────────────────────────┘
+Card width:  400px, centered vertically and horizontally
+Background:  bg-base (darkest)
+Card bg:     bg-surface
+Card border: 1px border-default
+No shadow    — flat design
+No rounded-xl — rounded-md only
+Error state: input border switches to border-p1, error text below
+12. Responsive Behaviour
+Maestro is a desktop-first tool. Engineers use it on laptops and monitors. Mobile support is not v1 — but we do not break on smaller screens.
+Breakpoint
+Sidebar
+Layout Changes
+< 768px (mobile)
+Hidden
+Sidebar becomes hamburger menu. Tables scroll horizontally. Not designed for use.
+768px–1024px (tablet)
+Collapsed 56px
+Shows icons only. Hover for labels. Tables hide lower-priority columns.
+1024px–1440px (laptop)
+Full 220px
+Default layout. All columns visible.
+> 1440px (monitor)
+Full 220px
+Main content max-width 1400px, centered.
+13. Performance Requirements
+Metric
+Target
+How to Achieve
+First Contentful Paint
+< 1.2s
+Next.js SSR, no client-side waterfall on first load
+Time to Interactive
+< 2.0s
+Code split by route, lazy load charts and heavy components
+Incidents table (100 rows)
+< 100ms render
+TanStack Table virtual rows — only render visible rows
+Route navigation
+< 200ms
+Next.js prefetch on hover, Zustand local state no refetch
+Bundle size
+< 200kb gzipped
+Tree-shake all libraries, no moment.js (use date-fns)
+Lighthouse score
+> 90
+SSR, proper meta, image optimization, semantic HTML
+// Key Next.js optimizations
+// 1. Lazy load heavy components
+const RotaCalendar = dynamic(() => import('@/components/rota/RotaCalendar'), {
+  loading: () => <SkeletonCalendar />
+});
+// 2. TanStack Table row virtualization for large lists
+const rowVirtualizer = useVirtual({
+  count: incidents.length,
+  parentRef: tableContainerRef,
+  estimateSize: useCallback(() => 36, []),  // 36px row height
+});
+// 3. TanStack Query stale time — don't refetch if data is fresh
+const { data } = useQuery({
+  queryKey: ['incidents', filters],
+  queryFn:  fetchIncidents,
+  staleTime: 30 * 1000,   // 30s — dashboard data
+  refetchInterval: 10000, // but also poll every 10s for freshness
+});
+14. Frontend Build Order
+Frontend builds in Week 11–12. Backend must be complete and stable before frontend starts. These are the exact tasks in order:
+Day
+Task
+What to Build
+Done When
+1
+Project setup
+create-next-app, Tailwind config, shadcn init, folder structure, CSS variables skeleton
+App boots, /dashboard renders shell
+2
+Auth
+Supabase Auth, login page, middleware redirect, session provider
+Login → redirect to /dashboard
+3
+Shell layout
+Sidebar, Header, DashboardLayout wrapper, routing
+Nav works, all routes render blank pages
+4
+API layer
+Axios instance, TanStack Query setup, all query hooks skeleton
+useIncidents() returns real data from backend
+5
+Incidents table
+IncidentTable, IncidentRow, IncidentBadge, StatusBadge, sorting
+Table renders 100 incidents, sort works
+6
+Incident detail
+Detail page, timeline, ACK/resolve buttons, escalation timer
+Full detail page with working ACK button
+7
+Dashboard
+MetricCards, OnCallWidget, ActiveFeed, RecentActivity
+Dashboard shows real live data
+8
+Real-time
+Supabase Realtime hooks, incident row live update
+Status change reflects in < 500ms
+9
+Rota page
+RotaCalendar, RotaSlotCard, week navigation
+Calendar shows correct engineers per day
+10
+Engineers page
+EngineerTable, EngineerRow, SkillTagBadge, slide-over panel
+Full team list with edit capability
+11
+Handovers page
+HandoverCard, AudioPlayer, briefing text view
+Audio plays in browser
+12
+Command palette
+CommandPalette component, keyboard shortcuts, all actions wired
+⌘K opens palette, A acknowledges incident
+13
+Settings pages
+Escalation policy editor, integration config, team settings
+Can update escalation policy from UI
+14
+Polish + deploy
+Toast system, empty states, error boundaries, Vercel deploy
+Production URL live, Lighthouse > 90
+15. Environment Variables
+# .env.local
+# Next.js
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+# Backend API
+NEXT_PUBLIC_API_URL=http://localhost:8000
+API_SECRET_KEY=your-internal-api-key
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...   # server-side only, never NEXT_PUBLIC
+Final Reminder — Colors
+Every component in this document references CSS variables. You fill in the hex values in globals.css and the entire app changes. Start with 6 colors minimum: bg-base, bg-surface, text-primary, text-muted, border-default, brand-primary. Everything else derives from those six.
+16. Auth & Onboarding Pages
+These pages sit outside the main dashboard layout — no sidebar, no header. They are the first thing every user sees. Owner lands here on first register, Engineers land here when they accept an invite.
+Who Sees What
+OWNER: Login > Register > Onboarding Step 1 > Step 2 > Step 3 > Dashboard
+ADMIN / ENGINEER: Invite email > Accept Invite > Onboarding Step 2 only > Dashboard
+RETURNING USER: Login > Dashboard (onboarding already done)
+16.1 Complete Page List
+#
+Route
+Who Lands Here
+Purpose
+1
+/login
+Everyone
+Sign in with Google or email+password
+2
+/register
+Owner only
+Create new account and team
+3
+/onboarding/team
+Owner only
+Team name, role, timezone, team size
+4
+/onboarding/contact
+Owner + Admin + Engineer
+Phone, skill tags, Slack, max on-call hours
+5
+/onboarding/invite
+Owner only
+Invite engineers by email
+6
+/invite/accept?token=xxx
+Invited Admin + Engineer
+Accept invitation, create password
+7
+/forgot-password
+Anyone
+Request password reset email
+8
+/reset-password?token=xxx
+Anyone
+Set new password from email link
+9
+/auth/callback
+System only
+Supabase OAuth redirect handler
+16.2 Login Page  /login
+Default entry point for all users. Inspired by Vercel login — card centered on dark background, two clear options, nothing else on the page.
+Card: 400px wide, centered vertically + horizontally, bg-surface, border-default
+  [Logo]  OnCall Maestro
+  Sign in to your workspace
+  [ G  Continue with Google          ]
+  ────────────── or ──────────────
+  Email
+  [ you@company.com                  ]
+  Password
+  [ ••••••••••••            [show]   ]
+  [           Sign in               ]
+  Dont have an account?  Register ->
+  Forgot password?
+Field
+Type
+Required
+Validation
+Email
+email input
+Yes
+Valid email format
+Password
+password input
+Yes
+Min 8 characters
+Error states:
+  Wrong password:    Incorrect email or password
+  No account:        No account found. Register instead?
+  Unverified email:  Please verify your email first
+  Network:           Something went wrong. Try again.
+Error style: text-p1 text-sm below submit button
+Input border switches to border-p1 on error
+Never clear the email field on error
+On success: redirect to /dashboard
+New user (Google): redirect to /onboarding/team
+16.3 Register Page  /register
+Owner only. Engineers are never sent here — they come through the invite link. Simple 4-field form.
+Card: 400px wide, centered, same style as login
+  [Logo]  OnCall Maestro
+  Create your account
+  [ G  Sign up with Google           ]
+  ────────────── or ──────────────
+  Full name
+  [ Priya Nair                       ]
+  Work email
+  [ priya@acme.com                   ]
+  Password
+  [ ••••••••••••            [show]   ]
+  Confirm password
+  [ ••••••••••••                     ]
+  [         Create account          ]
+  Already have an account?  Sign in ->
+Field
+Type
+Required
+Validation
+Full name
+text
+Yes
+Min 2 chars, max 80 chars
+Work email
+email
+Yes
+Valid email, unique in DB
+Password
+password
+Yes
+Min 8 chars, 1 uppercase, 1 number
+Confirm password
+password
+Yes
+Must exactly match password
+What gets saved to DB on submit:
+  users table — INSERT:
+    id                    UUID from Supabase Auth
+    email                 from form
+    full_name             from form
+    role                  OWNER  (hardcoded on register)
+    onboarding_complete   false
+    created_at            now()
+  On success: redirect to /onboarding/team
+  Google signup: same redirect, name+email auto-filled from Google
+16.4 Onboarding Step 1  /onboarding/team
+Owner only. Runs immediately after register. Creates the team that all engineers will join. Shows progress indicator Step 1 of 3.
+Card: 480px wide (wider than login), centered
+  Step 1 of 3 -- Set up your team
+  [filled]--[empty]--[empty]
+  Team name
+  [ Acme Engineering                 ]
+  This is what your engineers see
+  Your role
+  [ Senior SRE                     v ]
+  SRE / Platform Eng / Backend Eng /
+  Infra Lead / Manager / DevOps / Other
+  Your timezone
+  [ UTC+5:30 -- India/Kolkata       v ]
+  Auto-detected, confirm or change
+  Team size
+  [ 5-10 engineers                  v ]
+  1-5 / 5-10 / 10-25 / 25-50 / 50+
+                         [ Continue -> ]
+Field
+Type
+Required
+Notes
+Team name
+text
+Yes
+Min 2 chars. Auto-generates URL slug
+Your role
+select
+Yes
+7 options — stored in engineer profile
+Your timezone
+select
+Yes
+Full tz list, auto-detected from browser
+Team size
+select
+Yes
+5 range options — analytics only
+What gets saved:
+  teams table -- INSERT:
+    id, name, slug (auto from name), owner_id, timezone_primary, created_at
+  engineers table -- INSERT:
+    id, user_id, team_id (new team), full_name, email,
+    role_title (from form), timezone, is_active=true, created_at
+  On success: redirect to /onboarding/contact
+16.5 Onboarding Step 2  /onboarding/contact
+This page is shown to EVERYONE — Owner (Step 2 of 3), Admin and Engineer (their only onboarding step). These are the most critical fields for Maestro to function correctly.
+Why These 3 Fields Are Critical
+Mobile number: Twilio calls this for P1 voice escalation. Without it voice escalation fails silently.
+Skill tags: Claude uses these to route the right alert to the right engineer. Without them Maestro is just PagerDuty.
+Timezone: Rota scheduling and fairness scoring depend on accurate timezones.
+Card: 480px wide, centered
+  Step 2 of 3 -- How do we reach you?  (owner)
+  Step 1 of 1 -- How do we reach you?  (engineer)
+  Mobile number  (for P1 voice escalation)
+  [ +91 v ] [ 98765 43210               ]
+  We call this when P1 fires and you have not ACKd in 5 min
+  Backup number  (optional)
+  [ +91 v ] [                            ]
+  Skill tags  (what are you expert in?)
+  [ postgres x ] [ redis x ] [ k8s x ]
+  [ Type a skill and press Enter...      ]
+  Claude uses these to route the right alerts to you
+  Common: [postgres] [redis] [k8s] [node.js]
+          [python]   [aws]   [grafana] [nginx]
+  Slack username  (optional)
+  [ @priya.nair                          ]
+  For Slack DM notifications and /ack command
+  Max on-call hours per week
+  [ 40 hours                           v ]
+  20 / 30 / 40 / No limit
+  [<- Back]                  [Continue ->]
+Field
+Type
+Required
+Notes
+Mobile number
+phone + country code
+Recommended
+Skippable but voice escalation breaks
+Backup number
+phone + country code
+No
+Used if primary unreachable
+Skill tags
+tag input
+Recommended
+Type + Enter. Dismissible pills
+Slack username
+text
+No
+@handle format. Settings can update later
+Max on-call hours
+select
+No
+Rota engine respects this cap
+What gets saved:
+  engineers table -- UPDATE:
+    phone_primary, phone_backup, skill_tags (String[]),
+    slack_username, max_oncall_hrs
+  Owner  ->  redirect to /onboarding/invite
+  Admin / Engineer  ->  redirect to /dashboard
+    onboarding_complete set to true for Admin/Engineer here
+Skill tag UX:
+  Type any text -> press Enter or comma -> becomes pill badge
+  Click X on pill -> removes it
+  Suggestion chips below for common skills -- click to add
+16.6 Onboarding Step 3  /onboarding/invite
+Owner only. Final onboarding step. Invite engineers by email. All invitees receive an email with a link to the Accept Invite page. Skippable — engineers can be added later from Settings.
+Card: 480px wide, centered
+  Step 3 of 3 -- Invite your engineers
+  [filled]--[filled]--[filled]
+  Email addresses
+  [ lucas@acme.com                   ]
+  [ omar@acme.com                    ]
+  [                                  ]
+  [+ Add another email]
+  Default role for all invites
+  [ Engineer                       v ]
+  Engineer / Admin
+  You can change individual roles later
+  Personal message  (optional)
+  [ Hey team, joining OnCall Maestro ]
+  [ for our on-call rotations.       ]
+  [Skip for now]         [Send invites ->]
+  You can always invite more from Settings -> Team
+Field
+Type
+Required
+Notes
+Email addresses
+dynamic list
+1 if not skipping
+Add/remove rows. Each validated as email
+Default role
+select
+Yes
+Engineer or Admin. Applied to all
+Personal message
+textarea
+No
+Included in invite email body
+What gets saved per invited email:
+  invite_tokens table -- INSERT:
+    id, team_id, email, role, token (random 32 bytes hex),
+    expires_at (now + 7 days), accepted_at (null), created_at
+  Supabase sends invite email with link:
+    https://yourapp.com/invite/accept?token={token}
+  users -- UPDATE owner: onboarding_complete = true
+  On success / skip: redirect to /dashboard
+16.7 Accept Invitation  /invite/accept
+Every invited Admin and Engineer lands here. Token in URL is validated on page load. If expired or already used, show a clear error — not a 404.
+Card: 400px wide, centered
+  [Logo]  OnCall Maestro
+  Priya Nair invited you to join
+  -- Acme Engineering --
+  as an Engineer
+  [ G  Accept with Google            ]
+  ────────────── or ──────────────
+  Full name  (pre-filled if Google)
+  [ Lucas Ferreira                   ]
+  Password
+  [ ••••••••••••            [show]   ]
+  Confirm password
+  [ ••••••••••••                     ]
+  [         Accept and join         ]
+  By joining you agree to Terms
+EXPIRED TOKEN STATE:
+  This invite link has expired.
+  Invite links are valid for 7 days.
+  Ask your team admin to send a new invite.
+Field
+Type
+Required
+Notes
+Full name
+text
+Yes
+Pre-filled from Google if using Google
+Password
+password
+Yes if not Google
+Min 8 chars, 1 uppercase, 1 number
+Confirm password
+password
+Yes if not Google
+Must match password
+What gets saved on accept:
+  users -- INSERT: id, email (from invite), full_name, role (from invite), onboarding_complete=false
+  engineers -- INSERT: user_id, team_id (from invite), full_name, email, is_active=true
+  invite_tokens -- UPDATE: accepted_at = now()
+  On success: redirect to /onboarding/contact (Step 2 only)
+  They skip team setup (Step 1) and invite step (Step 3)
+16.8 Forgot + Reset Password
+FORGOT PASSWORD  /forgot-password
+  Forgot your password?
+  Enter your email and we will send you a reset link.
+  Email
+  [ you@company.com                  ]
+  [        Send reset link          ]
+  <- Back to sign in
+  SUCCESS STATE (replaces form after submit):
+  Check your email.
+  A reset link has been sent to you@company.com
+  Link expires in 1 hour.
+  <- Back to sign in
+────────────────────────────────────────────────────
+RESET PASSWORD  /reset-password?token=xxx
+  Set a new password
+  New password
+  [ ••••••••••••            [show]   ]
+  Confirm new password
+  [ ••••••••••••                     ]
+  PASSWORD STRENGTH: [========--] Strong
+  [        Update password          ]
+  On success: redirect to /login with toast:
+  Password updated. Sign in with your new password.
+Page
+Field
+Required
+Notes
+Forgot password
+Email
+Yes
+Must match existing account
+Reset password
+New password
+Yes
+Min 8 chars, strength meter shown
+Reset password
+Confirm password
+Yes
+Must match new password
+16.9 Complete Field Summary — Every Page Every Role
+Field
+Owner
+Admin
+Engineer
+Where Collected
+Full name
+Register
+Accept invite
+Accept invite
+Register / Accept invite
+Work email
+Register
+from invite
+from invite
+Register (owner) / auto (invited)
+Password
+Register
+Accept invite
+Accept invite
+Register / Accept invite
+Team name
+Onboarding S1
+not shown
+not shown
+Step 1 owner only
+Role title (SRE etc)
+Onboarding S1
+Onboarding S2
+Onboarding S2
+S1 for owner, S2 for others
+Timezone
+Onboarding S1
+Onboarding S2
+Onboarding S2
+S1 for owner, S2 for others
+Team size
+Onboarding S1
+not shown
+not shown
+Step 1 owner only
+Mobile number
+Onboarding S2
+Onboarding S2
+Onboarding S2
+Step 2 everyone
+Backup number
+Optional S2
+Optional S2
+Optional S2
+Step 2 optional
+Skill tags
+Onboarding S2
+Onboarding S2
+Onboarding S2
+Step 2 everyone
+Slack username
+Optional S2
+Optional S2
+Optional S2
+Step 2 optional
+Max on-call hours
+Optional S2
+Optional S2
+Optional S2
+Step 2 optional
+Invite emails
+Onboarding S3
+not shown
+not shown
+Step 3 owner only
+The 3 Fields That Make Maestro Work
+1. Mobile number: Twilio calls this for P1 voice escalation. Without it voice calls fail.
+2. Skill tags: Claude uses these to route the right alert to the right engineer. Without them Maestro is PagerDuty.
+3. Timezone: Rota engine and fairness scoring depend on this being accurate.
+
+Make sure the onboarding UI explains WHY each field matters. Engineers who understand the reason will fill it in properly.

@@ -2,9 +2,9 @@
 
 :root {
   /* ── Core palette ──────────────────── */
-  --bg-primary: #0a0e1a;
-  --bg-secondary: #111827;
-  --bg-card: #1a1f35;
+  --bg-primary: #a46910;
+  --bg-secondary: #2b323e;
+  --bg-card: #278b58;
   --bg-card-hover: #222845;
   --bg-glass: rgba(26, 31, 53, 0.8);
   
@@ -17,7 +17,7 @@
   --accent-secondary: #06b6d4;
   --accent-gradient: linear-gradient(135deg, #6366f1, #06b6d4);
   
-  --success: #22c55e;
+  --success: #5eafda;
   --success-bg: rgba(34, 197, 94, 0.12);
   --warning: #f59e0b;
   --warning-bg: rgba(245, 158, 11, 0.12);
