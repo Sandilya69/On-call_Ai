@@ -1,26 +1,105 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  /* ── Brand Colors ── */
+  --color-brand-primary:      #E35336; /* Primary */
+  --color-brand-secondary:    #A0522D; /* Secondary */
+  --color-brand-accent:       #F4A460; /* Accent */
+  
+  /* ── Background Layers ── */
+  --color-bg-base:            #F5F5DC; /* BG Base */
+  --color-bg-surface:         #FFFFFF; /* Card BG */
+  --color-bg-elevated:        #FFFFFF;
+  --color-bg-subtle:          #FAF3E8; /* Subtle BG */
+  
+  /* ── Text ── */
+  --color-text-primary:       #2B2B2B; /* Text Primary */
+  --color-text-secondary:     #6B5E55; /* Text Secondary */
+  --color-text-muted:         rgba(107, 94, 85, 0.6); /* Text Secondary with opacity */
+  --color-text-inverse:       #FFFFFF;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* ── Borders ── */
+  --color-border-default:     #E0D6C8; /* Border */
+  --color-border-strong:      #E35336;
+  --color-border-subtle:      rgba(224, 214, 200, 0.5);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* ── Severity — FIXED ── */
+  --color-p1:        #EF4444;   
+  --color-p1-bg:     rgba(239, 68, 68, 0.1);   
+  --color-p2:        #F97316;   
+  --color-p2-bg:     rgba(249, 115, 22, 0.1);
+  --color-p3:        #EAB308;   
+  --color-p3-bg:     rgba(234, 179, 8, 0.1);
+  --color-p4:        #22C55E;   
+  --color-p4-bg:     rgba(34, 197, 94, 0.1);
+
+  /* ── Status — FIXED ── */
+  --color-firing:    #EF4444;
+  --color-acked:     #3B82F6;
+  --color-resolved:  #22C55E;
+  --color-suppressed:#64748B;
+
+  /* ── Interactive ── */
+  --color-focus-ring:         #F4A460;
+  --color-interactive-hover:  #FAF3E8;
+  --color-interactive-active: #E0D6C8;
+
+  --font-sans: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 🧊 Glass Card */
+.glass-card {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.15),
+    rgba(255, 255, 255, 0.05)
+  );
+
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* ✏️ Input */
+.input {
+  width: 100%;
+  padding: 10px 12px;
+
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+
+  border-radius: 8px;
+  color: white;
+  outline: none;
+}
+
+.input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 🔥 Button (your burnt sienna) */
+.btn-primary {
+  background: #E35336;
+  color: white;
+  padding: 10px;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: 0.2s ease;
+}
+
+.btn-primary:hover {
+  background: #c9442b;
 }
